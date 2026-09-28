@@ -342,7 +342,7 @@ crowdMaterial.onBeforeCompile = (shader) => {
     )
     .replace(
       '#include <uv_vertex>',
-      'vec2 crowdUv = uv;\\nfloat crowdFrame = floor(mod(uCrowdTime * 0.9 + crowdPhase, 3.0));\\ncrowdUv.x = (crowdUv.x + crowdVariant) / 6.0;\\ncrowdUv.y = (crowdUv.y + crowdFrame) / 3.0;\\nvCrowdAtlasUv = crowdUv;'
+      'vec2 crowdUv = uv;\\nfloat crowdFrame = floor(mod(uCrowdTime * 0.9 + crowdPhase, 3.0));\\ncrowdUv.x = (crowdUv.x + crowdVariant) / 6.0;\\ncrowdUv.y = (crowdUv.y + (2.0 - crowdFrame)) / 3.0;\\nvCrowdAtlasUv = crowdUv;'
     );
   shader.fragmentShader = shader.fragmentShader
     .replace(
