@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Just Volleyball — Toon Edition</title>
+
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%23070b14%22/><circle cx=%2216%22 cy=%2216%22 r=%2210%22 fill=%22%23fff%22/><path d=%22M8 16h16M16 6v20%22 stroke=%22%2307b6bd%22 stroke-width=%223%22/></svg>">
+</head>
+<body>
+
+<div id="fpsCounter" style="position:fixed;right:18px;top:18px;z-index:30;padding:7px 10px;border-radius:10px;background:rgba(5,10,25,.72);color:#fff;font:800 12px/1.1 Arial,sans-serif;letter-spacing:.4px;pointer-events:none">FPS: --</div>
+
+<div id="crosshair">
+  <div class="ring"></div>
+  <div class="dot"></div>
+</div>
+
+<div id="callFlash"></div>
+
+<div id="hud">
+  <div class="team home">HOME <span id="setsHomeDisplay" class="stars" style="margin-left: 6px;"></span></div>
+  <div class="score"><span id="scoreHome">0</span> — <span id="scoreAway">0</span></div>
+  <div class="team away"><span id="setsAwayDisplay" class="stars" style="margin-right: 6px;"></span> AWAY</div>
+</div>
+
+<div id="speedIndicator" style="position:fixed;left:18px;bottom:18px;z-index:20;padding:8px 12px;border-radius:12px;background:rgba(5,10,25,.72);color:#fff;font-weight:800;font-size:12px;letter-spacing:.5px;pointer-events:none">VELOCIDAD 0.0</div>
+  <div id="subtitle">15 PUNTOS (DIF. 2) · MEJOR DE 3 SETS</div>
+
+<div id="controls">
+  <span><kbd>WASD</kbd> mover</span>
+  <span><kbd>MOUSE</kbd> cámara libre</span>
+  <span><kbd class="hi">E</kbd> armar/colocar</span>
+  <span><kbd class="hi">CLIC</kbd> golpear (Saltar para rematar)</span>
+  <span><kbd class="hi3">C</kbd> tirarse</span>
+  <span><kbd>ESPACIO</kbd> saltar</span>
+  <span><kbd class="hi2">REMATE</kbd> zona aérea ampliada</span>
+</div>
+
+<div id="overlay">
+  <div class="box">
+    <h1 id="ovTitle">¡GANASTE!</h1>
+    <div class="final" id="ovScore">15 — 0</div>
+    <div class="hint">Haz clic para jugar de nuevo</div>
+  </div>
+</div>
+
+<div id="startOverlay">
+  <div class="box">
+    <h1>JUST VOLLEYBALL</h1>
+    <h2>Toon & Power Spike Edition</h2>
+    <div class="keylist">
+      <div class="row"><kbd>WASD</kbd><span>moverte (Libre!)</span></div>
+      <div class="row"><kbd>MOUSE</kbd><span>rotar cámara (Libertad total)</span></div>
+      <div class="row"><kbd>RUEDA</kbd><span>zoom</span></div>
+      <div class="row"><kbd>ESPACIO</kbd><span>saltar</span></div>
+      <div class="row"><kbd>E</kbd><span>colocar / armar altísimo</span></div>
+      <div class="row"><kbd>CLIC</kbd><span>golpear (En el aire = Remate de Potencia)</span></div>
+      <div class="row"><kbd>C</kbd><span>tirarse al suelo</span></div>
+      <div class="row"><kbd>ESC</kbd><span>soltar cursor</span></div>
+    </div>
+    <div class="cta">▶ Hacé clic para empezar</div>
+  </div>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module" src="js/game.js"></script>
+<div style="position:fixed;right:18px;bottom:18px;z-index:20;padding:8px 12px;border-radius:12px;background:rgba(5,10,25,.65);color:#fff;font-size:11px;pointer-events:none">SHIFT · CORRER &nbsp; | &nbsp; C · DIVE &nbsp; | &nbsp; E · COLOCAR</div>
+</body>
+</html>

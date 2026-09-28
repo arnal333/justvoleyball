@@ -1,0 +1,11 @@
+Just Volleyball v11 — FIX4
+
+Cambios:
+- Orientación visual del modelo corregida: giro interno de 180° sin alterar la orientación lógica/physics.
+- Altura visual igualada a PLAYER_H = 1.85 m.
+- Animación de respiración FBX desactivada/eliminada de esta build.
+- Se conserva RunFast para el movimiento.
+- Pointer Lock protegido contra SecurityError cuando el navegador acaba de salir del lock.
+- requestPointerLock solo se solicita desde una interacción del usuario y los rechazos quedan controlados.
+- Favicon embebido para evitar el 404 de favicon.ico.
+- Contador de FPS visible arriba a la derecha.
