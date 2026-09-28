@@ -437,19 +437,19 @@ function addPerimeterStand(a, b, edgeIndex) {
       const px = THREE.MathUtils.lerp(a.x, b.x, t);
       const pz = THREE.MathUtils.lerp(a.y, b.y, t);
 
-      crowdDummy.position.set(
+      dummy.position.set(
         px + normal.x * (r * ROW_DEPTH + 0.21),
         y + 0.52 + ((i + r + edgeIndex) % 3) * 0.025,
         pz + normal.z * (r * ROW_DEPTH + 0.21)
       );
-      crowdDummy.rotation.set(0, Math.atan2(-normal.x, -normal.z), 0);
-      crowdDummy.scale.set(
+      dummy.rotation.set(0, Math.atan2(-normal.x, -normal.z), 0);
+      dummy.scale.set(
         0.78 + ((i + edgeIndex) % 3) * 0.08,
         0.88 + ((i + r) % 2) * 0.10,
         1
       );
-      crowdDummy.updateMatrix();
-      crowdMeshes[pose].setMatrixAt(poseIndices[pose]++, crowdDummy.matrix);
+      dummy.updateMatrix();
+      crowdMeshes[pose].setMatrixAt(poseIndices[pose]++, dummy.matrix);
     }
 
     for (const mesh of crowdMeshes) {
