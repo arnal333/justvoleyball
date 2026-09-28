@@ -1759,7 +1759,7 @@ let clickPending = false; let setPending = false; let divePending = false;
 let player2HitPending = false; let player2SetPending = false; let player2DivePending = false; let player2JumpPending = false;
 let sprinting = false;
 let mobileMoveX = 0, mobileMoveZ = 0;
-let networkJumpPending = false;
+let jumpPending = false;
 let lastHitLabelTimer = 0;
 const startOverlay = document.getElementById('startOverlay');
 let pointerLocked = false;
@@ -1781,7 +1781,7 @@ window.addEventListener('keydown', e => {
     if (k === 'enter') player2JumpPending = true;
   }
 
-  if (e.key === ' ') e.preventDefault();
+  if (e.key === ' ') { e.preventDefault(); jumpPending = true; }
 });
 window.addEventListener('keyup', e => {
   const k = e.key.toLowerCase();
@@ -1843,7 +1843,7 @@ function bindMobileControls() {
 
   document.getElementById('mobileSet')?.addEventListener('pointerdown', e => { e.preventDefault(); setPending = true; });
   document.getElementById('mobileHit')?.addEventListener('pointerdown', e => { e.preventDefault(); clickPending = true; });
-  document.getElementById('mobileJump')?.addEventListener('pointerdown', e => { e.preventDefault(); networkJumpPending = true; keys[' '] = true; });
+  document.getElementById('mobileJump')?.addEventListener('pointerdown', e => { e.preventDefault(); jumpPending = true; });
   document.getElementById('mobileDive')?.addEventListener('pointerdown', e => { e.preventDefault(); divePending = true; });
 }
 bindMobileControls();
@@ -2363,7 +2363,7 @@ function updateHumanEntity(entity, keyState, actions, dt, cameraRelative = true)
 function updatePlayer(dt) {
   const actions = {
     dive: divePending,
-    jump: !!keys[' '],
+    jump: jumpPending,
     hit: clickPending,
     set: setPending && !(gameState === 'serve' && serveSub.server === player && serveSub.phase === 'holding')
   };
@@ -2371,6 +2371,7 @@ function updatePlayer(dt) {
   if (divePending) divePending = false;
   if (clickPending) clickPending = false;
   if (setPending && !actions.set) setPending = false;
+  jumpPending = false;
 
   updateHumanEntity(player, keys, actions, dt, true);
   sprinting = !!(keys['shift'] && (keys['w'] || keys['a'] || keys['s'] || keys['d']));
@@ -2471,6 +2472,7 @@ function pickTeamReceiver(team) {
 }
 
 function updateBot(bot, dt, teammates) {
+  if (bot.humanControlled) return;
   // Durante la preparación del saque los bots NO persiguen la pelota.
   // Solo vuelven a su posición y esperan a que el saque esté realmente en juego.
   if (gameState === 'serve') {
@@ -2735,12 +2737,12 @@ function makeInputForNetworkGuest() {
     x, z,
     sprint: !!keys['shift'],
     yaw: camYaw,
-    jump: networkJumpPending,
+    jump: jumpPending,
     hit: clickPending,
     set: setPending,
     dive: divePending
   };
-  networkJumpPending = clickPending = setPending = divePending = false;
+  jumpPending = clickPending = setPending = divePending = false;
   return input;
 }
 
