@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 window.THREE = THREE;
 
@@ -998,18 +999,53 @@ async function init3DCharacters() {
     characterAssets.scene = gltf.scene;
     characterAssets.runClip = gltf.animations?.find(a => a.name === 'RunFast') || gltf.animations?.[0] || null;
 
-    // IMPORTANTE:
-    // No usamos el FBX de respiración. Ese clip modifica también los brazos
-    // y produce la pose fea que estamos corrigiendo.
-    // La respiración ahora es procedural y solo toca torso/cuello.
+    // La animación de respiración sí se usa para los BRAZOS:
+    // queremos que el clip sea quien haga bajar los brazos al volver a idle.
+    // Filtramos el FBX para NO imponer su pose de torso, piernas, etc.
     characterAssets.idleClip = null;
+    try {
+      const fbx = await new FBXLoader().loadAsync('characters/respiracion.fbx');
+      const srcClip = fbx.animations?.[0];
+      if (srcClip) {
+        const ref = SkeletonUtils.clone(characterAssets.scene);
+        const refBones = new Map();
+        ref.traverse(o => { if (o.isBone) refBones.set(o.name, o); });
+
+        const allowed = new Set([
+          'LeftShoulder','RightShoulder',
+          'LeftArm','RightArm',
+          'LeftForeArm','RightForeArm',
+          'LeftHand','RightHand'
+        ]);
+        const tracks = [];
+        for (const track of srcClip.tracks) {
+          if (!track.name.endsWith('.quaternion')) continue;
+          const raw = track.name.slice(0, track.name.lastIndexOf('.'));
+          const target = findCharacterBone(raw, refBones);
+          if (!target || !allowed.has(target.name)) continue;
+          const mapped = buildRelativeQuaternionTrack(track, target);
+          if (mapped) tracks.push(mapped);
+        }
+
+        if (tracks.length) {
+          characterAssets.idleClip = new THREE.AnimationClip(
+            'Idle_Arms_Lower',
+            srcClip.duration,
+            tracks
+          );
+          console.log('Animación idle de brazos cargada:', tracks.length, 'tracks');
+        }
+      }
+    } catch (idleErr) {
+      console.warn('No se pudo cargar respiracion.fbx; se mantiene respiración procedural:', idleErr);
+    }
 
     characterAssets.loaded = true;
     for (const e of allEntities) e.attach3DCharacter();
     console.log('Personajes 3D cargados:', {
       run: !!characterAssets.runClip,
-      idle: false,
-      breathing: 'procedural'
+      idle: !!characterAssets.idleClip,
+      breathing: 'procedural torso + FBX arms'
     });
   } catch(err) {
     console.error('No se pudo cargar el modelo 3D:', err);
