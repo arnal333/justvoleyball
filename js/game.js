@@ -250,7 +250,7 @@ function makeCrowdAtlas() {
 
   const skins = ['#f1c7a5','#c98d68','#8d5a3c','#e6ad82','#6f442f','#f4d2b5'];
   const hairs = ['#20242c','#5a3424','#15171c','#b56a32','#3a241b','#d5b07a'];
-  const shirts = ['#38bdf8','#ef4444','#22c55e','#f59e0b','#a855f7','#f472b6'];
+  const shirts = ['#596574','#666a70','#5f6864','#777067','#625f69','#6c6b63'];
   const pantsColors = ['#202532','#263449','#303030','#3b2f24','#25213a','#243238'];
 
   for (let variant = 0; variant < cols; variant++) {
@@ -427,7 +427,7 @@ function addPerimeterStand(a, b, edgeIndex) {
   // Un pequeño solape en las puntas evita cualquier hueco visual entre sectores.
   const sectionLength = edgeLength + 0.55;
   const seatsPerRow = Math.max(38, Math.floor(edgeLength / 0.30));
-  const crowdCount = Math.floor(seatsPerRow * 0.80);
+  const crowdCount = seatsPerRow;
 
   for (let r = 0; r < ARENA_ROWS; r++) {
     const midX = (a.x + b.x) * 0.5 + normal.x * (r * ROW_DEPTH + ROW_DEPTH * 0.5);
@@ -485,8 +485,8 @@ function addPerimeterStand(a, b, edgeIndex) {
     // Público 2D individual: cada espectador es un sprite propio,
     // colocado en 3D sobre su asiento. Un atlas permite variar persona,
     // ropa, piel, pelo y pose sin convertir cada espectador en un draw call.
-    const crowdCount = Math.max(18, Math.floor(seatsPerRow * 0.70));
-    const crowdGeo = new THREE.PlaneGeometry(0.52, 0.98);
+    const crowdCount = seatsPerRow;
+    const crowdGeo = new THREE.PlaneGeometry(0.68, 1.02);
     const crowdMesh = new THREE.InstancedMesh(crowdGeo, crowdMaterial, crowdCount);
 
     const crowdDummy = new THREE.Object3D();
@@ -510,7 +510,7 @@ function addPerimeterStand(a, b, edgeIndex) {
       );
       crowdDummy.rotation.set(0, Math.atan2(-normal.x, -normal.z), 0);
 
-      const size = 0.82 + (((i * 29 + r * 7 + edgeIndex) % 100) / 100) * 0.24;
+      const size = 1.02 + (((i * 29 + r * 7 + edgeIndex) % 100) / 100) * 0.16;
       crowdDummy.scale.set(size, size * (0.94 + ((i + r) % 3) * 0.04), 1);
       crowdDummy.updateMatrix();
       crowdMesh.setMatrixAt(i, crowdDummy.matrix);
