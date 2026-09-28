@@ -242,56 +242,126 @@ const cameraColliders = [];
 
 const crowdAnimations = [];
 
-function makeCrowdTexture(pose = 0) {
+function makeCrowdAtlas() {
+  const cellW = 96, cellH = 128, cols = 6, rows = 3;
   const c = document.createElement('canvas');
-  c.width = 96; c.height = 128;
+  c.width = cellW * cols; c.height = cellH * rows;
   const g = c.getContext('2d');
-  g.clearRect(0, 0, c.width, c.height);
 
-  g.fillStyle = '#d7a47a';
-  g.beginPath(); g.arc(48, 27, 12, 0, Math.PI * 2); g.fill();
+  const skins = ['#f1c7a5','#c98d68','#8d5a3c','#e6ad82','#6f442f','#f4d2b5'];
+  const hairs = ['#20242c','#5a3424','#15171c','#b56a32','#3a241b','#d5b07a'];
+  const shirts = ['#38bdf8','#ef4444','#22c55e','#f59e0b','#a855f7','#f472b6'];
+  const pants  = ['#202532','#263449','#303030','#3b2f24','#25213a','#243238'];
 
-  g.fillStyle = '#20242c';
-  g.beginPath(); g.arc(48, 24, 12, Math.PI, Math.PI * 2); g.fill();
+  for (let variant = 0; variant < cols; variant++) {
+    for (let pose = 0; pose < rows; pose++) {
+      const ox = variant * cellW, oy = pose * cellH;
+      const skin = skins[variant], hair = hairs[variant];
+      const shirt = shirts[variant], pants = pants[variant];
+      const seated = variant >= 4;
 
-  g.fillStyle = pose === 1 ? '#38bdf8' : pose === 2 ? '#f472b6' : '#fbbf24';
-  g.beginPath(); g.roundRect(29, 43, 38, 42, 10); g.fill();
+      g.clearRect(ox, oy, cellW, cellH);
 
-  g.fillStyle = '#202532';
-  g.fillRect(34, 82, 12, 31);
-  g.fillRect(50, 82, 12, 31);
+      // Cabeza + pelo: pequeñas diferencias por persona.
+      g.fillStyle = skin;
+      g.beginPath();
+      g.arc(ox + 48, oy + 27, 12, 0, Math.PI * 2);
+      g.fill();
 
-  g.strokeStyle = pose === 1 ? '#38bdf8' : pose === 2 ? '#f472b6' : '#fbbf24';
-  g.lineWidth = 10; g.lineCap = 'round';
-  g.beginPath();
-  if (pose === 0) {
-    g.moveTo(30, 51); g.lineTo(19, 75);
-    g.moveTo(66, 51); g.lineTo(77, 75);
-  } else if (pose === 1) {
-    g.moveTo(31, 51); g.lineTo(18, 24);
-    g.moveTo(65, 51); g.lineTo(78, 24);
-  } else {
-    g.moveTo(31, 54); g.lineTo(23, 42);
-    g.moveTo(65, 54); g.lineTo(73, 42);
+      g.fillStyle = hair;
+      g.beginPath();
+      g.arc(ox + 48, oy + 24, 12, Math.PI, Math.PI * 2);
+      g.fill();
+
+      // Torso.
+      g.fillStyle = shirt;
+      g.beginPath();
+      if (seated) {
+        g.roundRect(ox + 29, oy + 43, 38, 35, 9);
+      } else {
+        g.roundRect(ox + 29, oy + 43, 38, 42, 10);
+      }
+      g.fill();
+
+      // Piernas: las variantes 4-5 están sentadas.
+      g.fillStyle = pants;
+      if (seated) {
+        g.fillRect(ox + 33, oy + 75, 28, 11);
+        g.fillRect(ox + 28, oy + 84, 24, 9);
+        g.fillRect(ox + 52, oy + 84, 24, 9);
+      } else {
+        g.fillRect(ox + 34, oy + 82, 12, 31);
+        g.fillRect(ox + 50, oy + 82, 12, 31);
+      }
+
+      // Brazos: 3 estados, pero cada espectador anima con su propia fase.
+      g.strokeStyle = shirt;
+      g.lineWidth = 10;
+      g.lineCap = 'round';
+      g.beginPath();
+      if (pose === 0) {
+        g.moveTo(ox + 30, oy + 51); g.lineTo(ox + 19, oy + 75);
+        g.moveTo(ox + 66, oy + 51); g.lineTo(ox + 77, oy + 75);
+      } else if (pose === 1) {
+        g.moveTo(ox + 31, oy + 51); g.lineTo(ox + 18, oy + 24);
+        g.moveTo(ox + 65, oy + 51); g.lineTo(ox + 78, oy + 24);
+      } else {
+        g.moveTo(ox + 31, oy + 54); g.lineTo(ox + 23, oy + 42);
+        g.moveTo(ox + 65, oy + 54); g.lineTo(ox + 73, oy + 42);
+      }
+      g.stroke();
+    }
   }
-  g.stroke();
 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
   tex.needsUpdate = true;
   return tex;
 }
 
-const crowdTextures = [makeCrowdTexture(0), makeCrowdTexture(1), makeCrowdTexture(2)];
+const crowdAtlas = makeCrowdAtlas();
+
+const crowdMaterial = new THREE.MeshBasicMaterial({
+  map: crowdAtlas,
+  transparent: true,
+  alphaTest: 0.12,
+  depthWrite: true,
+  side: THREE.DoubleSide
+});
+
+crowdMaterial.onBeforeCompile = (shader) => {
+  shader.uniforms.uCrowdTime = { value: 0 };
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      '#include <common>',
+      '#include <common>\\nattribute float crowdVariant;\\nattribute float crowdPhase;\\nvarying vec2 vCrowdAtlasUv;\\nuniform float uCrowdTime;'
+    )
+    .replace(
+      '#include <uv_vertex>',
+      'vec2 crowdUv = uv;\\nfloat crowdFrame = floor(mod(uCrowdTime * 0.9 + crowdPhase, 3.0));\\ncrowdUv.x = (crowdUv.x + crowdVariant) / 6.0;\\ncrowdUv.y = (crowdUv.y + crowdFrame) / 3.0;\\nvCrowdAtlasUv = crowdUv;'
+    );
+  shader.fragmentShader = shader.fragmentShader
+    .replace(
+      '#include <common>',
+      '#include <common>\\nvarying vec2 vCrowdAtlasUv;'
+    )
+    .replace(
+      '#include <map_fragment>',
+      'vec4 sampledDiffuseColor = texture2D( map, vCrowdAtlasUv );\\ndiffuseColor *= sampledDiffuseColor;'
+    );
+  crowdMaterial.userData.shader = shader;
+};
+crowdMaterial.customProgramCacheKey = () => 'crowd-atlas-v2';
 
 function updateCrowdAnimation(now) {
-  const t = now * 0.001;
-  for (const crowd of crowdAnimations) {
-    const mode = Math.floor((t * 0.9) + crowd.phase) % 3;
-    for (let i = 0; i < crowd.meshes.length; i++) crowd.meshes[i].visible = i === mode;
+  if (crowdMaterial.userData.shader) {
+    crowdMaterial.userData.shader.uniforms.uCrowdTime.value = now * 0.001;
   }
 }
-
 // Crea carteles con textura Canvas para mantener el estilo del arena.
 function makeArenaBannerTexture(title, subtitle = "") {
   const c = document.createElement('canvas');
@@ -412,51 +482,55 @@ function addPerimeterStand(a, b, edgeIndex) {
     seats.instanceMatrix.needsUpdate = true;
     stand.add(seats);
 
-    // Público: personas 2D instanciadas, con tres poses animadas.
-    const crowdCount = Math.max(18, Math.floor(seatsPerRow * 0.68));
-    const poseCounts = [0, 0, 0];
-    for (let i = 0; i < crowdCount; i++) poseCounts[i % 3]++;
+    // Público 2D individual: cada espectador es un sprite propio,
+    // colocado en 3D sobre su asiento. Un atlas permite variar persona,
+    // ropa, piel, pelo y pose sin convertir cada espectador en un draw call.
+    const crowdCount = Math.max(18, Math.floor(seatsPerRow * 0.70));
+    const crowdGeo = new THREE.PlaneGeometry(0.52, 0.98);
+    const crowdMesh = new THREE.InstancedMesh(crowdGeo, crowdMaterial, crowdCount);
 
-    const crowdMeshes = poseCounts.map((count, pose) => new THREE.InstancedMesh(
-      new THREE.PlaneGeometry(0.48, 0.92),
-      new THREE.MeshBasicMaterial({
-        map: crowdTextures[pose],
-        transparent: true,
-        alphaTest: 0.12,
-        depthWrite: true,
-        side: THREE.DoubleSide
-      }),
-      count
-    ));
+    const crowdDummy = new THREE.Object3D();
+    const variants = new Float32Array(crowdCount);
+    const phases = new Float32Array(crowdCount);
 
-    const poseIndices = [0, 0, 0];
     for (let i = 0; i < crowdCount; i++) {
-      const pose = i % 3;
       const seatIndex = (i * 7 + r * 13 + edgeIndex * 5) % seatsPerRow;
       const t = seatsPerRow === 1 ? 0.5 : seatIndex / (seatsPerRow - 1);
       const px = THREE.MathUtils.lerp(a.x, b.x, t);
       const pz = THREE.MathUtils.lerp(a.y, b.y, t);
 
-      dummy.position.set(
-        px + normal.x * (r * ROW_DEPTH + 0.21),
-        y + 0.52 + ((i + r + edgeIndex) % 3) * 0.025,
-        pz + normal.z * (r * ROW_DEPTH + 0.21)
+      // Pequeño desplazamiento para romper la cuadrícula perfecta.
+      const jitter = (((i * 17 + r * 31 + edgeIndex * 11) % 100) / 100 - 0.5) * 0.10;
+      const sideJitter = (((i * 23 + r * 19 + edgeIndex * 7) % 100) / 100 - 0.5) * 0.10;
+
+      crowdDummy.position.set(
+        px + normal.x * (r * ROW_DEPTH + 0.23) + sideJitter * normal.z,
+        y + 0.54 + jitter,
+        pz + normal.z * (r * ROW_DEPTH + 0.23) - sideJitter * normal.x
       );
-      dummy.rotation.set(0, Math.atan2(-normal.x, -normal.z), 0);
-      dummy.scale.set(
-        0.78 + ((i + edgeIndex) % 3) * 0.08,
-        0.88 + ((i + r) % 2) * 0.10,
-        1
-      );
-      dummy.updateMatrix();
-      crowdMeshes[pose].setMatrixAt(poseIndices[pose]++, dummy.matrix);
+      crowdDummy.rotation.set(0, Math.atan2(-normal.x, -normal.z), 0);
+
+      const size = 0.82 + (((i * 29 + r * 7 + edgeIndex) % 100) / 100) * 0.24;
+      crowdDummy.scale.set(size, size * (0.94 + ((i + r) % 3) * 0.04), 1);
+      crowdDummy.updateMatrix();
+      crowdMesh.setMatrixAt(i, crowdDummy.matrix);
+
+      variants[i] = (i * 7 + r * 3 + edgeIndex * 5) % 6;
+      phases[i] = ((i * 0.73 + r * 0.41 + edgeIndex * 0.37) % 6.0);
     }
 
-    for (const mesh of crowdMeshes) {
-      mesh.instanceMatrix.needsUpdate = true;
-      stand.add(mesh);
-    }
-    crowdAnimations.push({ meshes: crowdMeshes, phase: edgeIndex * 0.37 + r * 0.11 });
+    crowdMesh.geometry.setAttribute(
+      'crowdVariant',
+      new THREE.InstancedBufferAttribute(variants, 1)
+    );
+    crowdMesh.geometry.setAttribute(
+      'crowdPhase',
+      new THREE.InstancedBufferAttribute(phases, 1)
+    );
+    crowdMesh.instanceMatrix.needsUpdate = true;
+    stand.add(crowdMesh);
+    crowdAnimations.push(crowdMesh);
+
   }
 
   const topY = 0.22 + ARENA_ROWS * ROW_HEIGHT;
