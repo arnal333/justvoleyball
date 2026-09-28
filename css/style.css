@@ -165,3 +165,161 @@
     background: #fbbf24; border-radius: 50%;
     box-shadow: 0 0 6px #fbbf24;
   }
+
+
+/* =========================================================
+   JUST VOLLEYBALL ALPHA MENU + MOBILE
+   ========================================================= */
+body { background: #070b14; }
+button, input { font: inherit; }
+
+#fpsCounter {
+  position: fixed; right: 18px; top: 18px; z-index: 30;
+  padding: 7px 10px; border-radius: 10px;
+  background: rgba(5,10,25,.72); color: #fff;
+  font: 800 12px/1.1 Arial,sans-serif; letter-spacing: .4px;
+  pointer-events: none;
+}
+.net-status {
+  position: fixed; left: 18px; top: 18px; z-index: 30;
+  padding: 7px 11px; border-radius: 999px;
+  background: rgba(255,255,255,.92); color: #253044;
+  font: 900 11px/1 Arial,sans-serif; letter-spacing: 1px;
+  pointer-events: none;
+}
+
+#startOverlay {
+  padding: 22px;
+  background: rgba(4,7,14,.84);
+  backdrop-filter: blur(12px);
+  overflow: auto;
+  cursor: default;
+}
+.menu-shell {
+  width: min(1100px, 96vw);
+  color: #101522;
+  background: #f8f9fb;
+  border: 1px solid rgba(255,255,255,.8);
+  border-radius: 26px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.45);
+  padding: 26px;
+}
+.menu-header {
+  display: flex; justify-content: space-between; gap: 20px; align-items: flex-start;
+  border-bottom: 1px solid #dfe4eb; padding-bottom: 18px; margin-bottom: 20px;
+}
+.menu-header .eyebrow {
+  font-size: 12px; font-weight: 900; letter-spacing: 3px; color: #556071;
+}
+.menu-header h1 {
+  margin: 5px 0 2px; font-size: clamp(38px, 6vw, 68px); line-height: .9;
+  letter-spacing: 5px; color: #111827; text-shadow: none;
+}
+.menu-header p { margin-top: 10px; color: #687386; font-size: 12px; letter-spacing: 1px; }
+.ghost-btn, .primary-btn, .mode-btn, .promo-dot {
+  border: 0; cursor: pointer;
+}
+.ghost-btn {
+  background: #fff; color: #1f2937; border: 1px solid #ccd3de;
+  border-radius: 12px; padding: 10px 14px; font-weight: 900; letter-spacing: .8px;
+}
+.menu-grid {
+  display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr); gap: 18px;
+}
+.menu-panel {
+  background: #fff; border: 1px solid #e1e6ed; border-radius: 18px; padding: 18px;
+}
+.panel-title {
+  font-size: 11px; font-weight: 900; letter-spacing: 2px; color: #697588;
+  margin-bottom: 10px;
+}
+.network-title { margin-top: 18px; }
+.modes { display: flex; flex-direction: column; gap: 10px; }
+.mode-btn {
+  display: grid; text-align: left; gap: 4px;
+  background: #f5f7fa; color: #142033; border: 1px solid #dfe5ec;
+  border-radius: 14px; padding: 13px 14px; transition: .16s ease;
+}
+.mode-btn:hover { transform: translateY(-1px); border-color: #aeb8c8; background: #f0f3f7; }
+.mode-btn strong { font-size: 12px; letter-spacing: .7px; }
+.mode-btn span { font-size: 10px; color: #6e7888; }
+.mode-btn.compact { padding: 11px 12px; }
+.join-row, .server-row {
+  display: flex; gap: 8px; margin-top: 10px;
+}
+.join-row input, .server-row input {
+  width: 100%; min-width: 0;
+  border: 1px solid #ccd4df; border-radius: 11px; outline: 0;
+  background: #fbfcfe; color: #142033; padding: 10px 12px;
+}
+.join-row input { text-transform: uppercase; letter-spacing: 3px; font-weight: 900; }
+.server-row label {
+  align-self: center; font-size: 10px; color: #788395; white-space: nowrap;
+}
+.primary-btn {
+  background: #111827; color: #fff; border-radius: 11px; padding: 10px 14px; font-weight: 900;
+}
+.menu-status {
+  margin-top: 10px; min-height: 20px; font-size: 11px; font-weight: 800; color: #697588;
+}
+.promo-panel {
+  background: #fff;
+  display: flex; flex-direction: column;
+}
+.promo-card {
+  min-height: 220px; border-radius: 16px; padding: 24px;
+  background: #fff; border: 1px solid #e4e8ee;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.promo-brand { font-size: 18px; font-weight: 1000; letter-spacing: 3px; color: #8c2234; }
+.promo-product { margin-top: 10px; font-size: 29px; font-weight: 1000; letter-spacing: 1px; color: #111827; }
+.promo-copy { margin-top: 10px; color: #687386; font-size: 12px; line-height: 1.5; max-width: 320px; }
+.promo-source { margin-top: 16px; font-size: 9px; font-weight: 900; letter-spacing: 1px; color: #9aa3af; text-transform: uppercase; }
+.promo-dots { display: flex; gap: 7px; justify-content: center; padding: 12px 0 4px; }
+.promo-dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd2dc; padding: 0; }
+.promo-dot.active { background: #1f2937; }
+.legal-note { margin-top: auto; padding-top: 8px; color: #9aa3af; font-size: 9px; line-height: 1.4; }
+.menu-footer {
+  border-top: 1px solid #dfe4eb; margin-top: 18px; padding-top: 14px;
+  display: flex; justify-content: space-between; gap: 10px; color: #7a8492;
+  font-size: 9px; font-weight: 900; letter-spacing: .8px; text-transform: uppercase;
+}
+.mobile-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+#mobileControls {
+  display: none; position: fixed; inset: 0; z-index: 25; pointer-events: none;
+}
+.mobile-stick {
+  position: absolute; left: 20px; bottom: 22px; width: 116px; height: 116px;
+  border-radius: 50%; background: rgba(255,255,255,.18); border: 2px solid rgba(255,255,255,.32);
+  pointer-events: auto; touch-action: none;
+}
+.stick-knob {
+  position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; transform: translate(-50%,-50%);
+  border-radius: 50%; background: rgba(255,255,255,.78); box-shadow: 0 8px 25px rgba(0,0,0,.25);
+}
+.mobile-actions {
+  position: absolute; right: 16px; bottom: 18px; width: 190px;
+}
+.mobile-actions .action {
+  width: 84px; height: 54px; border: 0; border-radius: 15px;
+  background: rgba(255,255,255,.86); color: #111827; font-size: 10px; font-weight: 1000;
+  pointer-events: auto; touch-action: manipulation; box-shadow: 0 6px 18px rgba(0,0,0,.2);
+}
+.mobile-actions .action.hit { background: #111827; color: #fff; }
+.mobile-actions .action.jump { background: #f4c542; }
+.mobile-actions .action.dive { background: #c85068; color: #fff; }
+
+@media (pointer: coarse), (max-width: 900px) {
+  #controls, #crosshair { display: none; }
+  #mobileControls.ready { display: block; }
+  .menu-shell { padding: 18px; border-radius: 20px; }
+  .menu-header { flex-direction: column; }
+  .menu-grid { grid-template-columns: 1fr; }
+  .promo-card { min-height: 160px; }
+  .menu-footer { flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .menu-shell { width: 100%; }
+  .mode-btn strong { font-size: 11px; }
+  .menu-header h1 { font-size: 48px; }
+}
