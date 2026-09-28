@@ -243,73 +243,103 @@ const cameraColliders = [];
 const crowdAnimations = [];
 
 function makeCrowdAtlas() {
-  const cellW = 96, cellH = 128, cols = 6, rows = 3;
+  // Público inspirado en la referencia: siluetas más humanas, compactas,
+  // principalmente sentadas, con algunas personas levantadas y poses variadas.
+  const cellW = 96, cellH = 128, cols = 6, rows = 4;
   const c = document.createElement('canvas');
   c.width = cellW * cols; c.height = cellH * rows;
   const g = c.getContext('2d');
 
-  const skins = ['#f1c7a5','#c98d68','#8d5a3c','#e6ad82','#6f442f','#f4d2b5'];
-  const hairs = ['#20242c','#5a3424','#15171c','#b56a32','#3a241b','#d5b07a'];
-  const shirts = ['#7b3340','#3f5872','#6f7440','#a06b32','#6b4f72','#3f716d'];
-  const pantsColors = ['#202532','#263449','#303030','#3b2f24','#25213a','#243238'];
+  const skins = ['#d6a078','#a96f4f','#70452f','#e0b58f','#8a563c','#c98c63'];
+  const hairs = ['#29221d','#3b271d','#17181a','#6b4027','#30231e','#b17b4a'];
+  // Colores de ropa de grada: visibles, pero naturales y nada neon.
+  const shirts = ['#8f3f4a','#405b73','#6f7045','#a06f43','#66506f','#3f6b68'];
+  const pantsColors = ['#30343b','#394353','#393735','#4a4038','#332f3d','#33403e'];
 
   for (let variant = 0; variant < cols; variant++) {
     for (let pose = 0; pose < rows; pose++) {
       const ox = variant * cellW, oy = pose * cellH;
       const skin = skins[variant], hair = hairs[variant];
-      const shirt = shirts[variant], pantsColor = pantsColors[variant];
-      const seated = variant >= 4;
+      const shirt = shirts[variant], pants = pantsColors[variant];
 
+      // Variantes 0-3: sentados. 4-5: alternan entre sentado y de pie.
+      const seated = variant < 4 || pose < 2;
       g.clearRect(ox, oy, cellW, cellH);
 
-      // Cabeza + pelo: pequeñas diferencias por persona.
+      // Cabeza más pequeña y natural, como en la referencia.
       g.fillStyle = skin;
       g.beginPath();
-      g.arc(ox + 48, oy + 27, 15, 0, Math.PI * 2);
+      g.arc(ox + 48, oy + 31, 10.5, 0, Math.PI * 2);
       g.fill();
 
+      // Pelo con formas distintas.
       g.fillStyle = hair;
       g.beginPath();
-      g.arc(ox + 48, oy + 23, 15, Math.PI, Math.PI * 2);
+      g.arc(ox + 48, oy + 28, 10.5, Math.PI, Math.PI * 2);
       g.fill();
+      if (variant % 3 === 1) {
+        g.fillRect(ox + 37, oy + 25, 4, 11);
+      } else if (variant % 3 === 2) {
+        g.fillRect(ox + 58, oy + 25, 4, 10);
+      }
 
-      // Torso.
+      // Cuello.
+      g.fillStyle = skin;
+      g.fillRect(ox + 44, oy + 39, 8, 7);
+
+      // Torso: menos geométrico y más parecido a una persona sentada.
       g.fillStyle = shirt;
       g.beginPath();
-      if (seated) {
-        g.roundRect(ox + 23, oy + 42, 50, 38, 6);
-      } else {
-        g.roundRect(ox + 23, oy + 42, 50, 45, 7);
-      }
+      g.moveTo(ox + 36, oy + 44);
+      g.lineTo(ox + 60, oy + 44);
+      g.lineTo(ox + 67, oy + 73);
+      g.lineTo(ox + 30, oy + 73);
+      g.closePath();
       g.fill();
 
-      // Piernas: las variantes 4-5 están sentadas.
-      g.fillStyle = pantsColor;
-      if (seated) {
-        g.fillRect(ox + 27, oy + 77, 42, 12);
-        g.fillRect(ox + 23, oy + 88, 29, 10);
-        g.fillRect(ox + 53, oy + 88, 29, 10);
-      } else {
-        g.fillRect(ox + 29, oy + 84, 15, 26);
-        g.fillRect(ox + 49, oy + 84, 15, 26);
-      }
-
-      // Brazos: 3 estados, pero cada espectador anima con su propia fase.
+      // Brazos y poses.
       g.strokeStyle = shirt;
-      g.lineWidth = 12;
+      g.lineWidth = 7;
       g.lineCap = 'round';
       g.beginPath();
+
       if (pose === 0) {
-        g.moveTo(ox + 25, oy + 50); g.lineTo(ox + 13, oy + 77);
-        g.moveTo(ox + 71, oy + 50); g.lineTo(ox + 83, oy + 77);
+        // Sentado relajado.
+        g.moveTo(ox + 36, oy + 48); g.lineTo(ox + 29, oy + 69);
+        g.moveTo(ox + 60, oy + 48); g.lineTo(ox + 67, oy + 69);
       } else if (pose === 1) {
-        g.moveTo(ox + 25, oy + 50); g.lineTo(ox + 13, oy + 20);
-        g.moveTo(ox + 71, oy + 50); g.lineTo(ox + 83, oy + 20);
+        // Aplaudiendo / manos al frente.
+        g.moveTo(ox + 37, oy + 50); g.lineTo(ox + 43, oy + 61);
+        g.moveTo(ox + 59, oy + 50); g.lineTo(ox + 53, oy + 61);
+      } else if (pose === 2) {
+        // De pie, brazos abajo.
+        g.moveTo(ox + 36, oy + 48); g.lineTo(ox + 29, oy + 71);
+        g.moveTo(ox + 60, oy + 48); g.lineTo(ox + 67, oy + 71);
       } else {
-        g.moveTo(ox + 25, oy + 54); g.lineTo(ox + 16, oy + 40);
-        g.moveTo(ox + 71, oy + 54); g.lineTo(ox + 80, oy + 40);
+        // Celebrando con brazos arriba.
+        g.moveTo(ox + 37, oy + 49); g.lineTo(ox + 25, oy + 27);
+        g.moveTo(ox + 59, oy + 49); g.lineTo(ox + 71, oy + 27);
       }
       g.stroke();
+
+      // Piernas: sentados ocupan poco alto; de pie son más largas.
+      g.fillStyle = pants;
+      if (seated) {
+        g.fillRect(ox + 31, oy + 72, 17, 10);
+        g.fillRect(ox + 48, oy + 72, 17, 10);
+        g.fillRect(ox + 25, oy + 82, 25, 7);
+        g.fillRect(ox + 46, oy + 82, 25, 7);
+      } else {
+        g.fillRect(ox + 34, oy + 72, 11, 31);
+        g.fillRect(ox + 51, oy + 72, 11, 31);
+      }
+
+      // Pequeños detalles de ropa/calzado.
+      g.fillStyle = '#202226';
+      if (!seated) {
+        g.fillRect(ox + 31, oy + 101, 17, 4);
+        g.fillRect(ox + 49, oy + 101, 17, 4);
+      }
     }
   }
 
@@ -322,7 +352,6 @@ function makeCrowdAtlas() {
   tex.needsUpdate = true;
   return tex;
 }
-
 const crowdAtlas = makeCrowdAtlas();
 
 const crowdMaterial = new THREE.MeshBasicMaterial({
@@ -342,7 +371,7 @@ crowdMaterial.onBeforeCompile = (shader) => {
     )
     .replace(
       '#include <uv_vertex>',
-      'vec2 crowdUv = uv;\nfloat crowdFrame = floor(mod(uCrowdTime * 0.9 + crowdPhase, 3.0));\ncrowdUv.x = (crowdUv.x + crowdVariant) / 6.0;\ncrowdUv.y = (crowdUv.y + (2.0 - crowdFrame)) / 3.0;\nvCrowdAtlasUv = crowdUv;'
+      'vec2 crowdUv = uv;\nfloat crowdFrame = floor(mod(uCrowdTime * 0.72 + crowdPhase, 4.0));\ncrowdUv.x = (crowdUv.x + crowdVariant) / 6.0;\ncrowdUv.y = (crowdUv.y + (3.0 - crowdFrame)) / 4.0;\nvCrowdAtlasUv = crowdUv;'
     );
   shader.fragmentShader = shader.fragmentShader
     .replace(
@@ -355,7 +384,7 @@ crowdMaterial.onBeforeCompile = (shader) => {
     );
   crowdMaterial.userData.shader = shader;
 };
-crowdMaterial.customProgramCacheKey = () => 'crowd-atlas-v2';
+crowdMaterial.customProgramCacheKey = () => 'crowd-atlas-v3';
 
 function updateCrowdAnimation(now) {
   if (crowdMaterial.userData.shader) {
@@ -485,8 +514,8 @@ function addPerimeterStand(a, b, edgeIndex) {
     // Público 2D individual: cada espectador es un sprite propio,
     // colocado en 3D sobre su asiento. Un atlas permite variar persona,
     // ropa, piel, pelo y pose sin convertir cada espectador en un draw call.
-    const crowdCount = seatsPerRow;
-    const crowdGeo = new THREE.PlaneGeometry(0.96, 1.34);
+    const crowdCount = Math.max(16, Math.floor(seatsPerRow * 0.46));
+    const crowdGeo = new THREE.PlaneGeometry(0.78, 1.04);
     const crowdMesh = new THREE.InstancedMesh(crowdGeo, crowdMaterial, crowdCount);
 
     const crowdDummy = new THREE.Object3D();
@@ -494,14 +523,14 @@ function addPerimeterStand(a, b, edgeIndex) {
     const phases = new Float32Array(crowdCount);
 
     for (let i = 0; i < crowdCount; i++) {
-      const seatIndex = (i * 7 + r * 13 + edgeIndex * 5) % seatsPerRow;
+      const seatIndex = (i * 2 + r * 5 + edgeIndex * 3) % seatsPerRow;
       const t = seatsPerRow === 1 ? 0.5 : seatIndex / (seatsPerRow - 1);
       const px = THREE.MathUtils.lerp(a.x, b.x, t);
       const pz = THREE.MathUtils.lerp(a.y, b.y, t);
 
       // Pequeño desplazamiento para romper la cuadrícula perfecta.
-      const jitter = (((i * 17 + r * 31 + edgeIndex * 11) % 100) / 100 - 0.5) * 0.10;
-      const sideJitter = (((i * 23 + r * 19 + edgeIndex * 7) % 100) / 100 - 0.5) * 0.10;
+      const jitter = (((i * 17 + r * 31 + edgeIndex * 11) % 100) / 100 - 0.5) * 0.055;
+      const sideJitter = (((i * 23 + r * 19 + edgeIndex * 7) % 100) / 100 - 0.5) * 0.045;
 
       crowdDummy.position.set(
         px + normal.x * (r * ROW_DEPTH + 0.23) + sideJitter * normal.z,
@@ -510,13 +539,13 @@ function addPerimeterStand(a, b, edgeIndex) {
       );
       crowdDummy.rotation.set(0, Math.atan2(-normal.x, -normal.z), 0);
 
-      const size = 1.12 + (((i * 29 + r * 7 + edgeIndex) % 100) / 100) * 0.20;
-      crowdDummy.scale.set(size, size * (0.98 + ((i + r) % 3) * 0.04), 1);
+      const size = 0.92 + (((i * 29 + r * 7 + edgeIndex) % 100) / 100) * 0.16;
+      crowdDummy.scale.set(size, size * (0.98 + ((i + r) % 3) * 0.03), 1);
       crowdDummy.updateMatrix();
       crowdMesh.setMatrixAt(i, crowdDummy.matrix);
 
       variants[i] = (i * 7 + r * 3 + edgeIndex * 5) % 6;
-      phases[i] = ((i * 0.73 + r * 0.41 + edgeIndex * 0.37) % 6.0);
+      phases[i] = ((i * 1.17 + r * 0.63 + edgeIndex * 0.91) % 12.0);
     }
 
     crowdMesh.geometry.setAttribute(
