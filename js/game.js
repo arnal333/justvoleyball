@@ -921,17 +921,36 @@ class CharacterVisual3D {
     }
   }
   applyBreathing(dt) {
+    // Respiración visible y sutil: se aplica DESPUÉS del mixer para que
+    // ningún clip idle pueda ocultarla. No modifica posición ni hitbox.
     this.breathTime = (this.breathTime || 0) + dt;
-    const phase = this.breathTime * 2.0;
+    const phase = this.breathTime * 1.65;
     const inhale = (Math.sin(phase) + 1) * 0.5;
+    const smooth = inhale * inhale * (3 - 2 * inhale);
+
     const spine = this.bone('Spine');
     const spine01 = this.bone('Spine01');
     const spine02 = this.bone('Spine02');
     const neck = this.bone('neck');
-    if (spine) spine.quaternion.copy(this.baseQ('Spine')).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0,0,0.012*inhale,'XYZ')));
-    if (spine01) spine01.quaternion.copy(this.baseQ('Spine01')).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.018*inhale,0,0,'XYZ')));
-    if (spine02) spine02.quaternion.copy(this.baseQ('Spine02')).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.028*inhale,0,0,'XYZ')));
-    if (neck) neck.quaternion.copy(this.baseQ('neck')).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.012*inhale,0,0,'XYZ')));
+
+    // Movimiento torácico más perceptible (aprox. 2–6 grados).
+    if (spine) this.deltaEuler('Spine', 0.018 * smooth, 0, 0);
+    if (spine01) this.deltaEuler('Spine01', -0.055 * smooth, 0, 0);
+    if (spine02) this.deltaEuler('Spine02', -0.085 * smooth, 0, 0);
+    if (neck) this.deltaEuler('neck', 0.028 * smooth, 0, 0);
+
+    // Expansión mínima del pecho para que la respiración sea visible incluso
+    // con cámara alejada, sin deformar el personaje.
+    const chest = spine02 || spine01 || spine;
+    if (chest) {
+      const b = this.base.get(chest.name);
+      if (b) {
+        chest.scale.copy(b.s);
+        const expand = 1 + 0.022 * smooth;
+        chest.scale.x *= expand;
+        chest.scale.z *= expand;
+      }
+    }
   }
   update(dt, entity, moving, sprintFactor) {
     let mode;
