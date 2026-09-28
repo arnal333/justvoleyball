@@ -758,7 +758,10 @@ function buildRelativeQuaternionTrack(src, targetBone) {
   const out = new Float32Array(vals.length);
   for (let i=0;i<n;i++) {
     const q = new THREE.Quaternion(vals[i*4],vals[i*4+1],vals[i*4+2],vals[i*4+3]).normalize();
-    const delta = q.clone().multiply(inv0);
+    // Retarget en espacio local: delta = inverse(q0) * q.
+    // La versión anterior usaba q * inverse(q0), que invierte el orden
+    // de la rotación y puede dejar los brazos rígidos o en una pose aplastada.
+    const delta = inv0.clone().multiply(q).normalize();
     const result = base.clone().multiply(delta).normalize();
     out[i*4]=result.x; out[i*4+1]=result.y; out[i*4+2]=result.z; out[i*4+3]=result.w;
   }
