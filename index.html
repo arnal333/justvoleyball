@@ -2,15 +2,22 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Just Volleyball — Toon Edition</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#ffffff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Just Volleyball">
+<title>Just Volleyball — Alpha</title>
 
+<link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="css/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%23070b14%22/><circle cx=%2216%22 cy=%2216%22 r=%2210%22 fill=%22%23fff%22/><path d=%22M8 16h16M16 6v20%22 stroke=%22%2307b6bd%22 stroke-width=%223%22/></svg>">
+<link rel="icon" href="icons/icon-192.svg">
 </head>
 <body>
 
-<div id="fpsCounter" style="position:fixed;right:18px;top:18px;z-index:30;padding:7px 10px;border-radius:10px;background:rgba(5,10,25,.72);color:#fff;font:800 12px/1.1 Arial,sans-serif;letter-spacing:.4px;pointer-events:none">FPS: --</div>
+<div id="fpsCounter">FPS: --</div>
+<div id="netStatus" class="net-status">LOCAL</div>
 
 <div id="crosshair">
   <div class="ring"></div>
@@ -20,54 +27,128 @@
 <div id="callFlash"></div>
 
 <div id="hud">
-  <div class="team home">HOME <span id="setsHomeDisplay" class="stars" style="margin-left: 6px;"></span></div>
+  <div class="team home">HOME <span id="setsHomeDisplay" class="stars"></span></div>
   <div class="score"><span id="scoreHome">0</span> — <span id="scoreAway">0</span></div>
-  <div class="team away"><span id="setsAwayDisplay" class="stars" style="margin-right: 6px;"></span> AWAY</div>
+  <div class="team away"><span id="setsAwayDisplay" class="stars"></span> AWAY</div>
 </div>
 
-<div id="speedIndicator" style="position:fixed;left:18px;bottom:18px;z-index:20;padding:8px 12px;border-radius:12px;background:rgba(5,10,25,.72);color:#fff;font-weight:800;font-size:12px;letter-spacing:.5px;pointer-events:none">VELOCIDAD 0.0</div>
-  <div id="subtitle">15 PUNTOS (DIF. 2) · MEJOR DE 3 SETS</div>
+<div id="speedIndicator">VELOCIDAD · 0.0</div>
+<div id="subtitle">15 PUNTOS (DIF. 2) · MEJOR DE 3 SETS</div>
 
 <div id="controls">
   <span><kbd>WASD</kbd> mover</span>
-  <span><kbd>MOUSE</kbd> cámara libre</span>
-  <span><kbd class="hi">E</kbd> armar/colocar</span>
-  <span><kbd class="hi">CLIC</kbd> golpear (Saltar para rematar)</span>
-  <span><kbd class="hi3">C</kbd> tirarse</span>
+  <span><kbd>MOUSE</kbd> cámara</span>
+  <span><kbd>E</kbd> colocar</span>
+  <span><kbd>CLIC</kbd> golpear</span>
+  <span><kbd>C</kbd> dive</span>
   <span><kbd>ESPACIO</kbd> saltar</span>
-  <span><kbd class="hi2">REMATE</kbd> zona aérea ampliada</span>
+</div>
+
+<div id="mobileControls" aria-hidden="true">
+  <div id="mobileStick" class="mobile-stick"><div class="stick-knob"></div></div>
+  <div class="mobile-actions">
+    <button id="mobileSet" class="action set">E</button>
+    <button id="mobileHit" class="action hit">GOLPE</button>
+    <button id="mobileJump" class="action jump">SALTO</button>
+    <button id="mobileDive" class="action dive">DIVE</button>
+  </div>
 </div>
 
 <div id="overlay">
   <div class="box">
     <h1 id="ovTitle">¡GANASTE!</h1>
     <div class="final" id="ovScore">15 — 0</div>
-    <div class="hint">Haz clic para jugar de nuevo</div>
+    <div class="hint">Volvé al menú para otra partida</div>
   </div>
 </div>
 
 <div id="startOverlay">
-  <div class="box">
-    <h1>JUST VOLLEYBALL</h1>
-    <h2>Toon & Power Spike Edition</h2>
-    <div class="keylist">
-      <div class="row"><kbd>WASD</kbd><span>moverte (Libre!)</span></div>
-      <div class="row"><kbd>MOUSE</kbd><span>rotar cámara (Libertad total)</span></div>
-      <div class="row"><kbd>RUEDA</kbd><span>zoom</span></div>
-      <div class="row"><kbd>ESPACIO</kbd><span>saltar</span></div>
-      <div class="row"><kbd>E</kbd><span>colocar / armar altísimo</span></div>
-      <div class="row"><kbd>CLIC</kbd><span>golpear (En el aire = Remate de Potencia)</span></div>
-      <div class="row"><kbd>C</kbd><span>tirarse al suelo</span></div>
-      <div class="row"><kbd>ESC</kbd><span>soltar cursor</span></div>
+  <div class="menu-shell">
+    <div class="menu-header">
+      <div>
+        <div class="eyebrow">JUST VOLLEYBALL</div>
+        <h1>ALPHA</h1>
+        <p>3D volleyball · local · móvil · PWA · multiplayer</p>
+      </div>
+      <button id="installPwa" class="ghost-btn">INSTALAR APP</button>
     </div>
-    <div class="cta">▶ Hacé clic para empezar</div>
+
+    <div class="menu-grid">
+      <section class="menu-panel modes">
+        <div class="panel-title">JUGAR</div>
+        <button class="mode-btn" data-mode="local-duo">
+          <strong>2 PLAYERS vs 2 CPU</strong>
+          <span>Dos jugadores en el mismo equipo.</span>
+        </button>
+        <button class="mode-btn" data-mode="local-cross">
+          <strong>PLAYER + CPU vs PLAYER + CPU</strong>
+          <span>Un jugador humano en cada lado.</span>
+        </button>
+
+        <div class="panel-title network-title">MULTIJUGADOR POR CÓDIGO</div>
+        <div class="network-actions">
+          <button class="mode-btn compact" data-mode="create-duo">
+            <strong>CREAR SALA · 2P vs 2 CPU</strong>
+            <span>Compartí el código con el otro jugador.</span>
+          </button>
+          <button class="mode-btn compact" data-mode="create-cross">
+            <strong>CREAR SALA · P + CPU vs P + CPU</strong>
+            <span>Un humano por equipo.</span>
+          </button>
+        </div>
+
+        <div class="join-row">
+          <input id="roomCode" maxlength="6" placeholder="CÓDIGO" autocomplete="off">
+          <button id="joinRoom" class="primary-btn">UNIRME</button>
+        </div>
+        <div class="server-row">
+          <label for="wsServer">WebSocket</label>
+          <input id="wsServer" placeholder="ws://localhost:8080/ws" autocomplete="off">
+        </div>
+        <div id="menuStatus" class="menu-status">Elegí un modo para comenzar.</div>
+      </section>
+
+      <section class="menu-panel promo-panel">
+        <div class="panel-title">EQUIPAMIENTO DESTACADO</div>
+        <div id="promoCard" class="promo-card">
+          <div class="promo-brand">MIKASA</div>
+          <div class="promo-product">V200W-VNL</div>
+          <div class="promo-copy">Balón de voleibol destacado de la línea 2026.</div>
+          <div class="promo-source">Referencia oficial</div>
+        </div>
+        <div class="promo-dots">
+          <button data-promo="0" class="promo-dot active"></button>
+          <button data-promo="1" class="promo-dot"></button>
+          <button data-promo="2" class="promo-dot"></button>
+        </div>
+        <div class="legal-note">Marcas mostradas como referencias visuales de equipamiento; no implica patrocinio.</div>
+      </section>
+    </div>
+
+    <div class="menu-footer">
+      <span>ALPHA 0.12.0</span>
+      <span>PC + Android + PWA</span>
+      <span>WebSocket rooms</span>
+    </div>
   </div>
 </div>
 
 <script type="importmap">
-{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "jszip": "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm"
+  }
+}
 </script>
+
 <script type="module" src="js/game.js"></script>
-<div style="position:fixed;right:18px;bottom:18px;z-index:20;padding:8px 12px;border-radius:12px;background:rgba(5,10,25,.65);color:#fff;font-size:11px;pointer-events:none">SHIFT · CORRER &nbsp; | &nbsp; C · DIVE &nbsp; | &nbsp; E · COLOCAR</div>
+<script type="module" src="js/menu.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  }
+</script>
 </body>
 </html>
