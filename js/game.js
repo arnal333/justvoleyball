@@ -240,6 +240,58 @@ const mergedRailGeo = [];
 // Objetos contra los que la cámara no debe atravesar (colisión de cámara).
 const cameraColliders = [];
 
+const crowdAnimations = [];
+
+function makeCrowdTexture(pose = 0) {
+  const c = document.createElement('canvas');
+  c.width = 96; c.height = 128;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, c.width, c.height);
+
+  g.fillStyle = '#d7a47a';
+  g.beginPath(); g.arc(48, 27, 12, 0, Math.PI * 2); g.fill();
+
+  g.fillStyle = '#20242c';
+  g.beginPath(); g.arc(48, 24, 12, Math.PI, Math.PI * 2); g.fill();
+
+  g.fillStyle = pose === 1 ? '#38bdf8' : pose === 2 ? '#f472b6' : '#fbbf24';
+  g.beginPath(); g.roundRect(29, 43, 38, 42, 10); g.fill();
+
+  g.fillStyle = '#202532';
+  g.fillRect(34, 82, 12, 31);
+  g.fillRect(50, 82, 12, 31);
+
+  g.strokeStyle = pose === 1 ? '#38bdf8' : pose === 2 ? '#f472b6' : '#fbbf24';
+  g.lineWidth = 10; g.lineCap = 'round';
+  g.beginPath();
+  if (pose === 0) {
+    g.moveTo(30, 51); g.lineTo(19, 75);
+    g.moveTo(66, 51); g.lineTo(77, 75);
+  } else if (pose === 1) {
+    g.moveTo(31, 51); g.lineTo(18, 24);
+    g.moveTo(65, 51); g.lineTo(78, 24);
+  } else {
+    g.moveTo(31, 54); g.lineTo(23, 42);
+    g.moveTo(65, 54); g.lineTo(73, 42);
+  }
+  g.stroke();
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const crowdTextures = [makeCrowdTexture(0), makeCrowdTexture(1), makeCrowdTexture(2)];
+
+function updateCrowdAnimation(now) {
+  const t = now * 0.001;
+  for (const crowd of crowdAnimations) {
+    const mode = Math.floor((t * 0.9) + crowd.phase) % 3;
+    for (let i = 0; i < crowd.meshes.length; i++) crowd.meshes[i].visible = i === mode;
+  }
+}
+
 // Crea carteles con textura Canvas para mantener el estilo del arena.
 function makeArenaBannerTexture(title, subtitle = "") {
   const c = document.createElement('canvas');
@@ -360,16 +412,26 @@ function addPerimeterStand(a, b, edgeIndex) {
     seats.instanceMatrix.needsUpdate = true;
     stand.add(seats);
 
-    // Público.
-    const crowdGeo = new THREE.SphereGeometry(0.11, 6, 5);
-    const crowd = new THREE.InstancedMesh(
-      crowdGeo,
-      (r + edgeIndex) % 3 ? spectatorMat : spectatorAltMat,
-      crowdCount
-    );
-    const crowdDummy = new THREE.Object3D();
+    // Público: personas 2D instanciadas, con tres poses animadas.
+    const crowdCount = Math.max(18, Math.floor(seatsPerRow * 0.68));
+    const poseCounts = [0, 0, 0];
+    for (let i = 0; i < crowdCount; i++) poseCounts[i % 3]++;
 
-    for (let i = 0; i < crowd.count; i++) {
+    const crowdMeshes = poseCounts.map((count, pose) => new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(0.48, 0.92),
+      new THREE.MeshBasicMaterial({
+        map: crowdTextures[pose],
+        transparent: true,
+        alphaTest: 0.12,
+        depthWrite: true,
+        side: THREE.DoubleSide
+      }),
+      count
+    ));
+
+    const poseIndices = [0, 0, 0];
+    for (let i = 0; i < crowdCount; i++) {
+      const pose = i % 3;
       const seatIndex = (i * 7 + r * 13 + edgeIndex * 5) % seatsPerRow;
       const t = seatsPerRow === 1 ? 0.5 : seatIndex / (seatsPerRow - 1);
       const px = THREE.MathUtils.lerp(a.x, b.x, t);
@@ -377,20 +439,24 @@ function addPerimeterStand(a, b, edgeIndex) {
 
       crowdDummy.position.set(
         px + normal.x * (r * ROW_DEPTH + 0.21),
-        y + 0.34 + ((i + r + edgeIndex) % 3) * 0.018,
+        y + 0.52 + ((i + r + edgeIndex) % 3) * 0.025,
         pz + normal.z * (r * ROW_DEPTH + 0.21)
       );
-      crowdDummy.rotation.y = yaw;
+      crowdDummy.rotation.set(0, Math.atan2(-normal.x, -normal.z), 0);
       crowdDummy.scale.set(
-        1,
-        1.15 + ((i + r) % 2) * 0.12,
+        0.78 + ((i + edgeIndex) % 3) * 0.08,
+        0.88 + ((i + r) % 2) * 0.10,
         1
       );
       crowdDummy.updateMatrix();
-      crowd.setMatrixAt(i, crowdDummy.matrix);
+      crowdMeshes[pose].setMatrixAt(poseIndices[pose]++, crowdDummy.matrix);
     }
-    crowd.instanceMatrix.needsUpdate = true;
-    stand.add(crowd);
+
+    for (const mesh of crowdMeshes) {
+      mesh.instanceMatrix.needsUpdate = true;
+      stand.add(mesh);
+    }
+    crowdAnimations.push({ meshes: crowdMeshes, phase: edgeIndex * 0.37 + r * 0.11 });
   }
 
   const topY = 0.22 + ARENA_ROWS * ROW_HEIGHT;
@@ -2364,6 +2430,7 @@ function updateFPS(now) {
 }
 function loop(now) {
   updateFPS(now);
+  updateCrowdAnimation(now);
   const dt = Math.min(0.033, Math.max(0.001, (now - lastTime) / 1000));
   lastTime = now; updateFlashes(dt);
 
