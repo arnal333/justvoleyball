@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 window.THREE = THREE;
 
@@ -921,32 +920,31 @@ class CharacterVisual3D {
     }
   }
   applyBreathing(dt) {
-    // Respiración visible y sutil: se aplica DESPUÉS del mixer para que
-    // ningún clip idle pueda ocultarla. No modifica posición ni hitbox.
+    // Respiración procedural: SOLO torso y cuello.
+    // No toca hombros, brazos, antebrazos ni manos.
     this.breathTime = (this.breathTime || 0) + dt;
     const phase = this.breathTime * 1.65;
     const inhale = (Math.sin(phase) + 1) * 0.5;
     const smooth = inhale * inhale * (3 - 2 * inhale);
 
+    // Muy leve expansión/contracción del pecho.
     const spine = this.bone('Spine');
     const spine01 = this.bone('Spine01');
     const spine02 = this.bone('Spine02');
     const neck = this.bone('neck');
 
-    // Movimiento torácico más perceptible (aprox. 2–6 grados).
-    if (spine) this.deltaEuler('Spine', 0.018 * smooth, 0, 0);
-    if (spine01) this.deltaEuler('Spine01', -0.055 * smooth, 0, 0);
-    if (spine02) this.deltaEuler('Spine02', -0.085 * smooth, 0, 0);
-    if (neck) this.deltaEuler('neck', 0.028 * smooth, 0, 0);
+    if (spine) this.deltaEuler('Spine', 0.010 * smooth, 0, 0);
+    if (spine01) this.deltaEuler('Spine01', -0.028 * smooth, 0, 0);
+    if (spine02) this.deltaEuler('Spine02', -0.042 * smooth, 0, 0);
+    if (neck) this.deltaEuler('neck', 0.012 * smooth, 0, 0);
 
-    // Expansión mínima del pecho para que la respiración sea visible incluso
-    // con cámara alejada, sin deformar el personaje.
+    // Expansión visual mínima, sin afectar posición ni hitbox.
     const chest = spine02 || spine01 || spine;
     if (chest) {
       const b = this.base.get(chest.name);
       if (b) {
         chest.scale.copy(b.s);
-        const expand = 1 + 0.022 * smooth;
+        const expand = 1 + 0.012 * smooth;
         chest.scale.x *= expand;
         chest.scale.z *= expand;
       }
@@ -1000,37 +998,19 @@ async function init3DCharacters() {
     characterAssets.scene = gltf.scene;
     characterAssets.runClip = gltf.animations?.find(a => a.name === 'RunFast') || gltf.animations?.[0] || null;
 
-    // Respiración: el FBX usa nombres Mixamo; se retargetea a los huesos del GLB
-    // manteniendo la pose base del personaje. Si el FBX falla, el juego sigue funcionando.
-    try {
-      const fbx = await new FBXLoader().loadAsync('characters/respiracion.fbx');
-      const src = fbx.animations?.[0];
-      if (src) {
-        const refModel = SkeletonUtils.clone(gltf.scene);
-        const bones = new Map();
-        refModel.traverse(o => { if (o.isBone) bones.set(o.name, o); });
-        const tracks = [];
-        for (const tr of src.tracks) {
-          const dot = tr.name.lastIndexOf('.');
-          if (dot < 1 || tr.name.slice(dot + 1) !== 'quaternion') continue;
-          const target = findCharacterBone(tr.name.slice(0, dot), bones);
-          if (!target) continue;
-          const rt = buildRelativeQuaternionTrack(tr, target);
-          if (rt) tracks.push(rt);
-        }
-        if (tracks.length) {
-          characterAssets.idleClip = new THREE.AnimationClip('Idle_Breathing', src.duration, tracks);
-        }
-      }
-      console.log('Respiracion cargada:', !!characterAssets.idleClip);
-    } catch (idleErr) {
-      characterAssets.idleClip = null;
-      console.warn('Respiracion no disponible; se mantiene idle estático.', idleErr);
-    }
+    // IMPORTANTE:
+    // No usamos el FBX de respiración. Ese clip modifica también los brazos
+    // y produce la pose fea que estamos corrigiendo.
+    // La respiración ahora es procedural y solo toca torso/cuello.
+    characterAssets.idleClip = null;
 
     characterAssets.loaded = true;
     for (const e of allEntities) e.attach3DCharacter();
-    console.log('Personajes 3D cargados:', {run:!!characterAssets.runClip, idle:!!characterAssets.idleClip});
+    console.log('Personajes 3D cargados:', {
+      run: !!characterAssets.runClip,
+      idle: false,
+      breathing: 'procedural'
+    });
   } catch(err) {
     console.error('No se pudo cargar el modelo 3D:', err);
   }
