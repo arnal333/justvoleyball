@@ -31,7 +31,7 @@ self.addEventListener('fetch', event => {
     caches.match(req).then(cached => {
       if (cached) return cached;
       return fetch(req).then(response => {
-        if (response.ok && (new URL(req.url).origin === self.location.origin || req.url.startsWith('https://unpkg.com/'))) {
+        if (response.ok && (new URL(req.url).origin === self.location.origin || req.url.startsWith('https://unpkg.com/') || req.url.startsWith('https://cdn.jsdelivr.net/'))) {
           const copy = response.clone();
           caches.open(CACHE).then(cache => cache.put(req, copy)).catch(() => {});
         }
