@@ -338,20 +338,20 @@ crowdMaterial.onBeforeCompile = (shader) => {
   shader.vertexShader = shader.vertexShader
     .replace(
       '#include <common>',
-      '#include <common>\\nattribute float crowdVariant;\\nattribute float crowdPhase;\\nvarying vec2 vCrowdAtlasUv;\\nuniform float uCrowdTime;'
+      '#include <common>\nattribute float crowdVariant;\nattribute float crowdPhase;\nvarying vec2 vCrowdAtlasUv;\nuniform float uCrowdTime;'
     )
     .replace(
       '#include <uv_vertex>',
-      'vec2 crowdUv = uv;\\nfloat crowdFrame = floor(mod(uCrowdTime * 0.9 + crowdPhase, 3.0));\\ncrowdUv.x = (crowdUv.x + crowdVariant) / 6.0;\\ncrowdUv.y = (crowdUv.y + (2.0 - crowdFrame)) / 3.0;\\nvCrowdAtlasUv = crowdUv;'
+      'vec2 crowdUv = uv;\nfloat crowdFrame = floor(mod(uCrowdTime * 0.9 + crowdPhase, 3.0));\ncrowdUv.x = (crowdUv.x + crowdVariant) / 6.0;\ncrowdUv.y = (crowdUv.y + (2.0 - crowdFrame)) / 3.0;\nvCrowdAtlasUv = crowdUv;'
     );
   shader.fragmentShader = shader.fragmentShader
     .replace(
       '#include <common>',
-      '#include <common>\\nvarying vec2 vCrowdAtlasUv;'
+      '#include <common>\nvarying vec2 vCrowdAtlasUv;'
     )
     .replace(
       '#include <map_fragment>',
-      'vec4 sampledDiffuseColor = texture2D( map, vCrowdAtlasUv );\\ndiffuseColor *= sampledDiffuseColor;'
+      'vec4 sampledDiffuseColor = texture2D( map, vCrowdAtlasUv );\ndiffuseColor *= sampledDiffuseColor;'
     );
   crowdMaterial.userData.shader = shader;
 };
