@@ -251,13 +251,13 @@ function makeCrowdAtlas() {
   const skins = ['#f1c7a5','#c98d68','#8d5a3c','#e6ad82','#6f442f','#f4d2b5'];
   const hairs = ['#20242c','#5a3424','#15171c','#b56a32','#3a241b','#d5b07a'];
   const shirts = ['#38bdf8','#ef4444','#22c55e','#f59e0b','#a855f7','#f472b6'];
-  const pants  = ['#202532','#263449','#303030','#3b2f24','#25213a','#243238'];
+  const pantsColors = ['#202532','#263449','#303030','#3b2f24','#25213a','#243238'];
 
   for (let variant = 0; variant < cols; variant++) {
     for (let pose = 0; pose < rows; pose++) {
       const ox = variant * cellW, oy = pose * cellH;
       const skin = skins[variant], hair = hairs[variant];
-      const shirt = shirts[variant], pants = pants[variant];
+      const shirt = shirts[variant], pantsColor = pantsColors[variant];
       const seated = variant >= 4;
 
       g.clearRect(ox, oy, cellW, cellH);
@@ -284,7 +284,7 @@ function makeCrowdAtlas() {
       g.fill();
 
       // Piernas: las variantes 4-5 están sentadas.
-      g.fillStyle = pants;
+      g.fillStyle = pantsColor;
       if (seated) {
         g.fillRect(ox + 33, oy + 75, 28, 11);
         g.fillRect(ox + 28, oy + 84, 24, 9);
