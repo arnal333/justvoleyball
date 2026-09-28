@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import JSZip from 'jszip';
+import { JVNetwork } from './multiplayer.js';
 window.THREE = THREE;
 
 
@@ -1165,11 +1167,98 @@ class CharacterVisual3D {
   }
 }
 
+async function loadUserAnimationPack() {
+  const ZIP_URL = 'https://raw.githubusercontent.com/arnal333/archivos/main/Meshy_AI_Paper_Star_Child_biped.zip';
+
+  try {
+    const response = await fetch(ZIP_URL, { cache: 'force-cache' });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const zip = await JSZip.loadAsync(await response.arrayBuffer());
+    const entries = Object.values(zip.files).filter(file => !file.dir && /\\.fbx$/i.test(file.name));
+    if (!entries.length) return { run: null, idle: null, files: [] };
+
+    const parsed = [];
+    for (const entry of entries) {
+      try {
+        const data = await entry.async('arraybuffer');
+        const fbx = new FBXLoader().parse(data, '');
+        if (fbx?.animations?.length) {
+          for (const clip of fbx.animations) parsed.push({ clip, source: entry.name });
+        }
+      } catch (err) {
+        console.warn('FBX ignorado del paquete:', entry.name, err);
+      }
+    }
+
+    if (!parsed.length) return { run: null, idle: null, files: entries.map(e => e.name) };
+
+    const ref = SkeletonUtils.clone(characterAssets.scene);
+    const refBones = new Map();
+    ref.traverse(o => { if (o.isBone) refBones.set(o.name, o); });
+
+    const retarget = (srcClip, name, allowed = null) => {
+      const tracks = [];
+      for (const track of srcClip.tracks) {
+        if (!track.name.endsWith('.quaternion')) continue;
+        const raw = track.name.slice(0, track.name.lastIndexOf('.'));
+        const target = findCharacterBone(raw, refBones);
+        if (!target || (allowed && !allowed.has(target.name))) continue;
+        const mapped = buildRelativeQuaternionTrack(track, target);
+        if (mapped) tracks.push(mapped);
+      }
+      return tracks.length ? new THREE.AnimationClip(name, srcClip.duration, tracks) : null;
+    };
+
+    // Para respiración usamos tronco, cuello y brazos para no pisar la pose de piernas.
+    const idleAllowed = new Set([
+      'Spine','Spine01','Spine02','neck',
+      'LeftShoulder','RightShoulder',
+      'LeftArm','RightArm',
+      'LeftForeArm','RightForeArm',
+      'LeftHand','RightHand'
+    ]);
+
+    let runClip = null;
+    let idleClip = null;
+
+    for (const item of parsed) {
+      const label = (item.clip.name + ' ' + item.source).toLowerCase();
+      if (!idleClip && /(respir|breath|idle|breathing)/i.test(label)) {
+        idleClip = retarget(item.clip, 'CustomBreathing', idleAllowed);
+      }
+      if (!runClip && /(run|running|sprint|jog)/i.test(label)) {
+        runClip = retarget(item.clip, 'CustomRun', null);
+      }
+    }
+
+    // Si el paquete solo trae una animación usable, la intentamos como idle.
+    if (!idleClip) {
+      for (const item of parsed) {
+        const guess = retarget(item.clip, 'CustomBreathingFallback', idleAllowed);
+        if (guess) { idleClip = guess; break; }
+      }
+    }
+
+    return {
+      run: runClip,
+      idle: idleClip,
+      files: entries.map(e => e.name)
+    };
+  } catch (err) {
+    console.warn('Paquete de animaciones externo no disponible; se usan los assets locales:', err);
+    return { run: null, idle: null, files: [] };
+  }
+}
+
 async function init3DCharacters() {
   try {
     const gltf = await new GLTFLoader().loadAsync('characters/player_base_rigged.glb');
     characterAssets.scene = gltf.scene;
     characterAssets.runClip = gltf.animations?.find(a => a.name === 'RunFast') || gltf.animations?.[0] || null;
+
+    // Intentamos usar también el paquete FBX/animaciones compartido en archivos.
+    const customPack = await loadUserAnimationPack();
+    if (customPack.run) characterAssets.runClip = customPack.run;
 
     // La animación de respiración sí se usa para los BRAZOS:
     // queremos que el clip sea quien haga bajar los brazos al volver a idle.
@@ -1211,6 +1300,9 @@ async function init3DCharacters() {
     } catch (idleErr) {
       console.warn('No se pudo cargar respiracion.fbx; se mantiene respiración procedural:', idleErr);
     }
+
+    // El breathing personalizado del paquete tiene prioridad sobre el clip local.
+    if (customPack.idle) characterAssets.idleClip = customPack.idle;
 
     characterAssets.loaded = true;
     for (const e of allEntities) e.attach3DCharacter();
@@ -1528,6 +1620,132 @@ const enemyBack = new Entity({
 const homeTeam = [player, teammateBot]; const awayTeam = [enemyFront, enemyBack];
 const allEntities = [...homeTeam, ...awayTeam];
 const ball = new Ball();
+
+// ------------------------------------------------------------
+// ALPHA MODES + MULTIPLAYER
+// ------------------------------------------------------------
+let gameMode = 'duo';
+let gameStarted = false;
+let networkEnabled = false;
+let networkHost = false;
+let networkRole = null;
+let networkRoomCode = '';
+let networkLocalSlot = 'home0';
+let networkGuestSlot = null;
+let network = null;
+let networkRemoteInput = {
+  x: 0, z: 0, sprint: false, yaw: 0,
+  jump: false, hit: false, set: false, dive: false
+};
+let networkSnapshot = null;
+let networkLastSnapshotAt = 0;
+let networkLastInputAt = 0;
+const humanSlots = new Set(['home0']);
+
+function entityForSlot(slot) {
+  return slot === 'home0' ? player
+    : slot === 'home1' ? teammateBot
+    : slot === 'away0' ? enemyFront
+    : enemyBack;
+}
+
+function setHumanSlots(slots) {
+  humanSlots.clear();
+  for (const slot of slots) humanSlots.add(slot);
+  for (const [slot, entity] of Object.entries({
+    home0: player, home1: teammateBot, away0: enemyFront, away1: enemyBack
+  })) {
+    entity.humanControlled = humanSlots.has(slot);
+  }
+}
+
+function setNetStatus(textValue) {
+  const el = document.getElementById('netStatus');
+  if (el) el.textContent = textValue;
+}
+
+function currentControlledEntity() {
+  if (networkEnabled && !networkHost) return entityForSlot(networkLocalSlot);
+  if (humanSlots.has('home1')) return teammateBot;
+  if (humanSlots.has('away0')) return enemyFront;
+  return player;
+}
+
+function captureNetSnapshot() {
+  return {
+    gameState, serveSide,
+    serveSub: { phase: serveSub.phase, timer: serveSub.timer },
+    scoreHome, scoreAway, setsHome, setsAway, homeTurn, awayTurn,
+    ball: {
+      x: ball.x, y: ball.y, z: ball.z,
+      vx: ball.vx, vy: ball.vy, vz: ball.vz,
+      activeTeam: ball.activeTeam, teamTouches: ball.teamTouches
+    },
+    entities: allEntities.map(e => ({
+      x: e.x, y: e.y, z: e.z, vy: e.vy,
+      onGround: e.onGround,
+      facingYaw: e.facingYaw,
+      targetFacingYaw: e.targetFacingYaw,
+      diveTime: e.diveTime, diveCooldown: e.diveCooldown,
+      hitCooldown: e.hitCooldown,
+      action: e.action, actionTime: e.actionTime,
+      moving: !!e.wasMoving,
+      sprint: !!e.networkSprint
+    }))
+  };
+}
+
+function applyNetSnapshot(snapshot, dt) {
+  if (!snapshot) return;
+  const t = 1 - Math.exp(-dt * 20);
+  gameState = snapshot.gameState || gameState;
+  serveSide = snapshot.serveSide || serveSide;
+  if (snapshot.serveSub) {
+    serveSub.phase = snapshot.serveSub.phase || serveSub.phase;
+    serveSub.timer = snapshot.serveSub.timer || 0;
+  }
+  scoreHome = snapshot.scoreHome ?? scoreHome;
+  scoreAway = snapshot.scoreAway ?? scoreAway;
+  setsHome = snapshot.setsHome ?? setsHome;
+  setsAway = snapshot.setsAway ?? setsAway;
+  homeTurn = snapshot.homeTurn ?? homeTurn;
+  awayTurn = snapshot.awayTurn ?? awayTurn;
+
+  if (snapshot.ball) {
+    ball.x += (snapshot.ball.x - ball.x) * t;
+    ball.y += (snapshot.ball.y - ball.y) * t;
+    ball.z += (snapshot.ball.z - ball.z) * t;
+    ball.vx = snapshot.ball.vx; ball.vy = snapshot.ball.vy; ball.vz = snapshot.ball.vz;
+    ball.activeTeam = snapshot.ball.activeTeam;
+    ball.teamTouches = snapshot.ball.teamTouches;
+  }
+
+  if (Array.isArray(snapshot.entities)) {
+    snapshot.entities.forEach((st, i) => {
+      const e = allEntities[i];
+      if (!e || !st) return;
+      e.x += (st.x - e.x) * t;
+      e.y += (st.y - e.y) * t;
+      e.z += (st.z - e.z) * t;
+      e.vy = st.vy || 0;
+      e.onGround = !!st.onGround;
+      e.targetFacingYaw = st.targetFacingYaw ?? st.facingYaw ?? e.targetFacingYaw;
+      e.facingYaw = st.facingYaw ?? e.facingYaw;
+      e.diveTime = st.diveTime || 0;
+      e.diveCooldown = st.diveCooldown || 0;
+      e.hitCooldown = st.hitCooldown || 0;
+      e.action = st.action || null;
+      e.actionTime = st.actionTime || 0;
+      e.wasMoving = !!st.moving;
+      e.networkSprint = !!st.sprint;
+      e.updateVisual(dt, !!st.moving, st.sprint ? 1 : 0);
+      e.sync();
+    });
+  }
+  ball.sync();
+  updateHUD();
+}
+
 init3DCharacters();
 
 let scoreHome = 0, scoreAway = 0;
@@ -1536,18 +1754,40 @@ let homeTurn = 0, awayTurn = 0;
 let gameState = 'serve'; let serveSide = 'home'; let serveSub = { phase: 'holding', timer: 0, server: null };
 
 const keys = {};
+const player2Keys = {};
 let clickPending = false; let setPending = false; let divePending = false;
+let player2HitPending = false; let player2SetPending = false; let player2DivePending = false; let player2JumpPending = false;
 let sprinting = false;
+let mobileMoveX = 0, mobileMoveZ = 0;
+let networkJumpPending = false;
 let lastHitLabelTimer = 0;
 const startOverlay = document.getElementById('startOverlay');
 let pointerLocked = false;
 
 window.addEventListener('keydown', e => {
-  const k = e.key.toLowerCase(); keys[k] = true;
-  if (k === 'e') setPending = true; if (k === 'c') divePending = true;
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+
+  // P1: WASD + E/C + Space
+  if (k === 'e') setPending = true;
+  if (k === 'c') divePending = true;
+
+  // P2 local: IJKL + U golpe + O colocación + P dive + Enter salto
+  if (['i','j','k','l','u','o','p','enter'].includes(k)) {
+    player2Keys[k] = true;
+    if (k === 'u') player2HitPending = true;
+    if (k === 'o') player2SetPending = true;
+    if (k === 'p') player2DivePending = true;
+    if (k === 'enter') player2JumpPending = true;
+  }
+
   if (e.key === ' ') e.preventDefault();
 });
-window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+window.addEventListener('keyup', e => {
+  const k = e.key.toLowerCase();
+  keys[k] = false;
+  player2Keys[k] = false;
+});
 
 let camYaw = 0, camPitch = 0.32, camDist = 9.5;
 const CAM_HEIGHT_BASE = 2.6;
@@ -1565,6 +1805,48 @@ renderer.domElement.addEventListener('wheel', e => {
   camDist = Math.max(4, Math.min(18, camDist + e.deltaY * 0.005));
   e.preventDefault();
 }, { passive: false });
+
+function bindMobileControls() {
+  const root = document.getElementById('mobileControls');
+  const stick = document.getElementById('mobileStick');
+  const knob = stick?.querySelector('.stick-knob');
+  if (!root || !stick || !knob) return;
+
+  let pointerId = null;
+  const updateStick = (clientX, clientY) => {
+    const rect = stick.getBoundingClientRect();
+    let x = (clientX - (rect.left + rect.width / 2)) / (rect.width / 2);
+    let z = (clientY - (rect.top + rect.height / 2)) / (rect.height / 2);
+    const len = Math.hypot(x, z);
+    if (len > 1) { x /= len; z /= len; }
+    mobileMoveX = x;
+    mobileMoveZ = -z;
+    knob.style.left = (50 + x * 30) + '%';
+    knob.style.top = (50 + z * 30) + '%';
+  };
+
+  stick.addEventListener('pointerdown', e => {
+    pointerId = e.pointerId;
+    stick.setPointerCapture(pointerId);
+    updateStick(e.clientX, e.clientY);
+  });
+  stick.addEventListener('pointermove', e => {
+    if (pointerId === e.pointerId) updateStick(e.clientX, e.clientY);
+  });
+  const release = e => {
+    if (pointerId !== e.pointerId) return;
+    pointerId = null; mobileMoveX = mobileMoveZ = 0;
+    knob.style.left = '50%'; knob.style.top = '50%';
+  };
+  stick.addEventListener('pointerup', release);
+  stick.addEventListener('pointercancel', release);
+
+  document.getElementById('mobileSet')?.addEventListener('pointerdown', e => { e.preventDefault(); setPending = true; });
+  document.getElementById('mobileHit')?.addEventListener('pointerdown', e => { e.preventDefault(); clickPending = true; });
+  document.getElementById('mobileJump')?.addEventListener('pointerdown', e => { e.preventDefault(); networkJumpPending = true; keys[' '] = true; });
+  document.getElementById('mobileDive')?.addEventListener('pointerdown', e => { e.preventDefault(); divePending = true; });
+}
+bindMobileControls();
 
 // ============================================================
 // AUDIO — Sonidos personalizados del paquete /sounds
@@ -1749,24 +2031,48 @@ function requestGamePointerLock() {
     if (result && typeof result.catch === 'function') result.catch(() => {});
   } catch (_) {}
 }
-startOverlay.addEventListener('click', () => {
-  ensureAudio();
+startOverlay.addEventListener('click', e => {
+  if (e.target.closest('button, input')) return;
   if (gameState === 'gameover') restart();
-  requestGamePointerLock();
 });
+
 renderer.domElement.addEventListener('click', () => {
   ensureAudio();
-  if (gameState === 'gameover') restart();
-  requestGamePointerLock();
+  if (gameState === 'gameover' && !networkEnabled) restart();
+  if (!matchMedia('(pointer: coarse)').matches && gameStarted) requestGamePointerLock();
 });
+
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === renderer.domElement;
   if (pointerLocked) startOverlay.classList.add('hidden');
-  else { startOverlay.classList.remove('hidden'); clickPending = false; }
+  else if (gameStarted && !matchMedia('(pointer: coarse)').matches) {
+    startOverlay.classList.remove('hidden');
+  }
 });
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+let cameraTouch = null;
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (!matchMedia('(pointer: coarse)').matches || e.pointerType !== 'touch') return;
+  cameraTouch = { id: e.pointerId, x: e.clientX, y: e.clientY };
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!cameraTouch || cameraTouch.id !== e.pointerId) return;
+  const dx = e.clientX - cameraTouch.x;
+  const dy = e.clientY - cameraTouch.y;
+  cameraTouch.x = e.clientX; cameraTouch.y = e.clientY;
+  targetYaw -= dx * 0.009;
+  targetPitch += dy * 0.009;
+  targetPitch = Math.max(-1.1, Math.min(1.2, targetPitch));
+});
+renderer.domElement.addEventListener('pointerup', e => {
+  if (cameraTouch?.id === e.pointerId) cameraTouch = null;
+});
+renderer.domElement.addEventListener('pointercancel', e => {
+  if (cameraTouch?.id === e.pointerId) cameraTouch = null;
 });
 
 function forwardDir() { return { dx: -Math.sin(camYaw), dz: -Math.cos(camYaw) }; }
@@ -1940,19 +2246,27 @@ function entityHit(entity, isSet, dirX, dirZ) {
   return false;
 }
 
+function humanHit(entity, isSet, dirX, dirZ) {
+  if (gameState === 'gameover') return false;
+  if (gameState === 'serve' && serveSub.server !== entity) return false;
+  if (gameState === 'serve' && serveSub.phase !== 'tossed') return false;
+  if (ball.lastHit === entity) return false;
+
+  const ok = entityHit(entity, isSet, dirX, dirZ);
+  if (ok && gameState === 'serve') {
+    gameState = 'play';
+    updateSubtitle();
+  }
+  return ok;
+}
+
 function playerHit(isSet) {
-  if (gameState === 'gameover') return;
-  // Un compañero NUNCA puede tocar durante el saque.
-  if (gameState === 'serve' && serveSub.server !== player) return;
-  if (gameState === 'serve' && serveSub.phase !== 'tossed') return;
-  if (ball.lastHit === player) return;
-  
   const f = forwardDir();
-  const ok = entityHit(player, isSet, f.dx, f.dz);
-  if (ok && gameState === 'serve') { gameState = 'play'; updateSubtitle(); }
+  return humanHit(player, isSet, f.dx, f.dz);
 }
 
 function autoReceive(entity) {
+  if (entity.humanControlled) return;
   if (gameState === 'serve') return; 
   if (entity.hitCooldown > 0) return;
   if (ball.lastHit === entity) return;
@@ -1978,57 +2292,159 @@ function autoReceive(entity) {
   entity.action = 'receive'; entity.actionTime = 0.4;
 }
 
-function updatePlayer(dt) {
-  const f = forwardDir(); const rightX = -f.dz, rightZ = f.dx;
+function updateHumanEntity(entity, keyState, actions, dt, cameraRelative = true) {
+  const f = cameraRelative ? forwardDir() : { dx: 0, dz: -1 };
+  const rightX = -f.dz, rightZ = f.dx;
+
   let inputX = 0, inputZ = 0;
-  if (keys['a'] || keys['arrowleft'])  inputX -= 1;
-  if (keys['d'] || keys['arrowright']) inputX += 1;
-  if (keys['w'] || keys['arrowup'])    inputZ += 1;
-  if (keys['s'] || keys['arrowdown'])  inputZ -= 1;
+  if (keyState['a'] || keyState['j']) inputX -= 1;
+  if (keyState['d'] || keyState['l']) inputX += 1;
+  if (keyState['w'] || keyState['i']) inputZ += 1;
+  if (keyState['s'] || keyState['k']) inputZ -= 1;
+
+  if (mobileMoveX || mobileMoveZ) {
+    inputX = mobileMoveX;
+    inputZ = mobileMoveZ;
+  }
+
+  // P2 controls use IJKL, while P1 uses WASD; normalize after selecting the layout.
+  if (entity === teammateBot || entity === enemyFront) {
+    inputX = 0; inputZ = 0;
+    if (keyState['j']) inputX -= 1;
+    if (keyState['l']) inputX += 1;
+    if (keyState['i']) inputZ += 1;
+    if (keyState['k']) inputZ -= 1;
+  }
+
   const len = Math.hypot(inputX, inputZ);
   if (len > 0) { inputX /= len; inputZ /= len; }
 
-  if (divePending) {
-    divePending = false;
-    if (gameState === 'play' || gameState === 'serve') {
-      const fdx = f.dx * inputZ + rightX * inputX, fdz = f.dz * inputZ + rightZ * inputX;
-      if (player.dive(fdx, fdz)) flashCharacter(player, 0xfbbf24);
+  if (actions.dive && entity.diveTime <= 0 && (gameState === 'play' || gameState === 'serve')) {
+    actions.dive = false;
+    const fdx = f.dx * inputZ + rightX * inputX;
+    const fdz = f.dz * inputZ + rightZ * inputX;
+    if (entity.dive(fdx, fdz)) flashCharacter(entity, 0xfbbf24);
+  }
+
+  if (entity.diveTime <= 0) {
+    const sprint = !!(keyState['shift'] && len > 0 && gameState !== 'gameover');
+    entity.networkSprint = sprint;
+    const speed = sprint ? 13.2 : 9.5;
+    const mvx = f.dx * inputZ + rightX * inputX;
+    const mvz = f.dz * inputZ + rightZ * inputX;
+    entity.x += mvx * speed * dt;
+    entity.z += mvz * speed * dt;
+
+    clampPointToArenaPolygon(entity, entity.radius + 0.08);
+    if (entity.team === 'home') entity.z = Math.max(0.7, Math.min(FREE_HALF_L - entity.radius, entity.z));
+    else entity.z = Math.max(-FREE_HALF_L + entity.radius, Math.min(-0.7, entity.z));
+
+    if (actions.jump && entity.onGround) {
+      actions.jump = false;
+      entity.jump();
     }
+    if (len > 0) entity.targetFacingYaw = Math.atan2(-mvx, -mvz);
+    else if (entity === player) entity.targetFacingYaw = camYaw;
   }
 
-  if (player.diveTime <= 0) {
-    sprinting = !!(keys['shift'] && len > 0 && gameState !== 'gameover');
-    const speed = sprinting ? 13.2 : 9.5;
-    const mvx = f.dx * inputZ + rightX * inputX, mvz = f.dz * inputZ + rightZ * inputX;
-    player.x += mvx * speed * dt; player.z += mvz * speed * dt;
-    // El jugador se mantiene dentro del anillo libre de 1 m y nunca entra a las gradas.
-    clampPointToArenaPolygon(player, player.radius + 0.08);
-    player.z = Math.max(0.7, Math.min(FREE_HALF_L - player.radius, player.z));
-    if (keys[' '] && player.onGround) player.jump();
-    if (len > 0) player.targetFacingYaw = Math.atan2(-mvx, -mvz);
-    else player.targetFacingYaw = camYaw;
-  }
-  
-  // LÍMITE DE SAQUE: se puede retroceder, pero también avanzar hasta
-  // quedar justo detrás de la línea de fondo, sin salir del ancho de la cancha
-  // (regla real: hay que sacar dentro de las líneas laterales).
-  if (gameState === 'serve' && serveSub.server === player) {
-    if (player.team === 'home') player.z = Math.max(SERVE_LINE, player.z);
-    if (player.team === 'away') player.z = Math.min(-SERVE_LINE, player.z);
-    player.x = Math.max(-H_COURT + player.radius, Math.min(H_COURT - player.radius, player.x));
+  if (gameState === 'serve' && serveSub.server === entity) {
+    if (entity.team === 'home') entity.z = Math.max(SERVE_LINE, entity.z);
+    if (entity.team === 'away') entity.z = Math.min(-SERVE_LINE, entity.z);
+    entity.x = Math.max(-H_COURT + entity.radius, Math.min(H_COURT - entity.radius, entity.x));
   }
 
-  const moving = len > 0 && player.diveTime <= 0;
-  player.update(dt, moving, sprinting ? 1 : 0);
+  const moving = len > 0 && entity.diveTime <= 0;
+  entity.update(dt, moving, entity.networkSprint ? 1 : 0);
+
+  if (actions.hit) { actions.hit = false; humanHit(entity, false, f.dx, f.dz); }
+  if (actions.set) { actions.set = false; humanHit(entity, true, f.dx, f.dz); }
+}
+
+function updatePlayer(dt) {
+  const actions = {
+    dive: divePending,
+    jump: !!keys[' '],
+    hit: clickPending,
+    set: setPending && !(gameState === 'serve' && serveSub.server === player && serveSub.phase === 'holding')
+  };
+
+  if (divePending) divePending = false;
+  if (clickPending) clickPending = false;
+  if (setPending && !actions.set) setPending = false;
+
+  updateHumanEntity(player, keys, actions, dt, true);
+  sprinting = !!(keys['shift'] && (keys['w'] || keys['a'] || keys['s'] || keys['d']));
 
   const speedEl = document.getElementById('speedIndicator');
-  if (speedEl) {
-    speedEl.textContent = sprinting ? 'SPRINT · ' + (13.2).toFixed(1) : 'VELOCIDAD · ' + (9.5).toFixed(1);
+  if (speedEl) speedEl.textContent = sprinting ? 'SPRINT · 13.2' : 'VELOCIDAD · 9.5';
+}
+
+function updatePlayer2(dt) {
+  const entity = humanSlots.has('home1') ? teammateBot : enemyFront;
+  if (!entity || !humanSlots.has(entity === teammateBot ? 'home1' : 'away0')) return;
+
+  const actions = {
+    dive: player2DivePending,
+    jump: player2JumpPending,
+    hit: player2HitPending,
+    set: player2SetPending
+  };
+  player2DivePending = false;
+  player2JumpPending = false;
+  player2HitPending = false;
+  player2SetPending = false;
+
+  updateHumanEntity(entity, player2Keys, actions, dt, false);
+}
+
+function updateNetworkControlledEntity(entity, input, dt) {
+  if (!entity || !input) return;
+
+  const yaw = Number.isFinite(input.yaw) ? input.yaw : entity.facingYaw;
+  const f = { dx: -Math.sin(yaw), dz: -Math.cos(yaw) };
+  const rightX = -f.dz, rightZ = f.dx;
+  const inputX = Number(input.x || 0);
+  const inputZ = Number(input.z || 0);
+  const len = Math.hypot(inputX, inputZ);
+
+  if (input.dive && entity.diveTime <= 0) {
+    const fdx = f.dx * inputZ + rightX * inputX;
+    const fdz = f.dz * inputZ + rightZ * inputX;
+    entity.dive(fdx, fdz);
   }
 
-  const holdingServe = gameState === 'serve' && serveSub.server === player && serveSub.phase === 'holding';
-  if (clickPending) { playerHit(false); clickPending = false; }
-  if (setPending && !holdingServe) { playerHit(true); setPending = false; }
+  if (entity.diveTime <= 0) {
+    const sprint = !!input.sprint && len > 0 && gameState !== 'gameover';
+    entity.networkSprint = sprint;
+    const speed = sprint ? 13.2 : 9.5;
+    const nx = len > 0.01 ? inputX / len : 0;
+    const nz = len > 0.01 ? inputZ / len : 0;
+    const mvx = f.dx * nz + rightX * nx;
+    const mvz = f.dz * nz + rightZ * nx;
+    entity.x += mvx * speed * dt;
+    entity.z += mvz * speed * dt;
+
+    clampPointToArenaPolygon(entity, entity.radius + 0.08);
+    if (entity.team === 'home') entity.z = Math.max(0.7, Math.min(FREE_HALF_L - entity.radius, entity.z));
+    else entity.z = Math.max(-FREE_HALF_L + entity.radius, Math.min(-0.7, entity.z));
+
+    if (input.jump && entity.onGround) entity.jump();
+    if (len > 0.01) entity.targetFacingYaw = Math.atan2(-mvx, -mvz);
+    else entity.targetFacingYaw = yaw;
+  }
+
+  if (gameState === 'serve' && serveSub.server === entity) {
+    if (entity.team === 'home') entity.z = Math.max(SERVE_LINE, entity.z);
+    if (entity.team === 'away') entity.z = Math.min(-SERVE_LINE, entity.z);
+    entity.x = Math.max(-H_COURT + entity.radius, Math.min(H_COURT - entity.radius, entity.x));
+  }
+
+  entity.update(dt, len > 0.01 && entity.diveTime <= 0, input.sprint ? 1 : 0);
+
+  if (input.hit && gameState !== 'serve') humanHit(entity, false, f.dx, f.dz);
+  if (input.set && gameState !== 'serve') humanHit(entity, true, f.dx, f.dz);
+
+  input.jump = input.hit = input.set = input.dive = false;
 }
 
 // Un solo "receptor oficial" por equipo: evita que dos compañeros del MISMO
@@ -2301,6 +2717,152 @@ function updateBot(bot, dt, teammates) {
   }
 }
 
+function makeInputForNetworkGuest() {
+  let x = 0, z = 0;
+  if (keys['a'] || keys['arrowleft']) x -= 1;
+  if (keys['d'] || keys['arrowright']) x += 1;
+  if (keys['w'] || keys['arrowup']) z += 1;
+  if (keys['s'] || keys['arrowdown']) z -= 1;
+
+  const len = Math.hypot(x, z);
+  if (len > 0) { x /= len; z /= len; }
+
+  if (mobileMoveX || mobileMoveZ) {
+    x = mobileMoveX; z = mobileMoveZ;
+  }
+
+  const input = {
+    x, z,
+    sprint: !!keys['shift'],
+    yaw: camYaw,
+    jump: networkJumpPending,
+    hit: clickPending,
+    set: setPending,
+    dive: divePending
+  };
+  networkJumpPending = clickPending = setPending = divePending = false;
+  return input;
+}
+
+function startNetworkMatch() {
+  gameStarted = true;
+  setHumanSlots(networkHost
+    ? ['home0', networkGuestSlot || (gameMode === 'duo' ? 'home1' : 'away0')]
+    : [networkLocalSlot]
+  );
+
+  if (networkHost) {
+    restart();
+    window.dispatchEvent(new CustomEvent('jv-network-status', { detail: { state: 'open' } }));
+    setNetStatus('SALA ' + networkRoomCode);
+  } else {
+    gameState = 'serve';
+    updateHUD();
+    setNetStatus('SALA ' + networkRoomCode);
+  }
+
+  startOverlay.classList.add('hidden');
+  const mobile = matchMedia('(pointer: coarse)').matches;
+  document.getElementById('mobileControls')?.classList.toggle('ready', mobile);
+  if (!mobile) requestGamePointerLock();
+}
+
+function connectNetwork(config) {
+  networkEnabled = true;
+  networkHost = false;
+  gameMode = config.mode || 'duo';
+  networkLocalSlot = 'home0';
+  setHumanSlots(['home0']);
+
+  network = new JVNetwork({
+    onStatus: state => {
+      window.dispatchEvent(new CustomEvent('jv-network-status', { detail: { state } }));
+      if (state === 'error' || state === 'closed') setNetStatus(state.toUpperCase());
+    },
+    onMessage: msg => {
+      if (msg.type === 'room-created') {
+        networkHost = true;
+        networkRole = msg.role;
+        networkRoomCode = msg.code;
+        networkLocalSlot = 'home0';
+        gameMode = msg.mode || gameMode;
+        window.dispatchEvent(new CustomEvent('jv-room-created', { detail: msg }));
+        setNetStatus('SALA ' + networkRoomCode + ' · ESPERANDO');
+      } else if (msg.type === 'room-joined') {
+        networkHost = false;
+        networkRole = msg.role;
+        networkRoomCode = msg.code;
+        networkLocalSlot = msg.slot || 'home1';
+        gameMode = msg.mode || gameMode;
+        window.dispatchEvent(new CustomEvent('jv-room-joined', { detail: msg }));
+      } else if (msg.type === 'peer-ready') {
+        networkGuestSlot = msg.guestSlot || (gameMode === 'duo' ? 'home1' : 'away0');
+        if (networkHost) {
+          startNetworkMatch();
+        } else {
+          setHumanSlots([networkLocalSlot]);
+          gameStarted = true;
+          startOverlay.classList.add('hidden');
+          const mobile = matchMedia('(pointer: coarse)').matches;
+          document.getElementById('mobileControls')?.classList.toggle('ready', mobile);
+          if (!mobile) requestGamePointerLock();
+          setNetStatus('SALA ' + networkRoomCode);
+        }
+      } else if (msg.type === 'remote-input' && networkHost) {
+        networkRemoteInput = {
+          ...networkRemoteInput,
+          ...(msg.input || {})
+        };
+      } else if (msg.type === 'snapshot' && !networkHost) {
+        networkSnapshot = msg.snapshot || null;
+        networkLastSnapshotAt = performance.now();
+      } else if (msg.type === 'peer-left') {
+        setNetStatus('JUGADOR DESCONECTADO');
+      } else if (msg.type === 'error') {
+        window.dispatchEvent(new CustomEvent('jv-network-error', { detail: msg }));
+        setNetStatus('ERROR');
+      }
+    }
+  });
+
+  network.connect(config.wsUrl).then(() => {
+    if (config.action === 'create') network.createRoom(gameMode);
+    else network.joinRoom(config.code);
+  }).catch(() => {
+    window.dispatchEvent(new CustomEvent('jv-network-error', { detail: { message: 'No se pudo abrir el WebSocket.' } }));
+  });
+}
+
+window.addEventListener('jv-menu-start', e => {
+  const config = e.detail || {};
+  gameStarted = true;
+  ensureAudio();
+
+  if (network) network.close();
+  network = null;
+  networkEnabled = false;
+  networkHost = false;
+  networkRoomCode = '';
+  networkGuestSlot = null;
+
+  if (config.kind === 'network') {
+    connectNetwork(config);
+    return;
+  }
+
+  gameMode = config.mode || 'duo';
+  setHumanSlots(gameMode === 'cross' ? ['home0', 'away0'] : ['home0', 'home1']);
+  restart();
+  startOverlay.classList.add('hidden');
+  const mobile = matchMedia('(pointer: coarse)').matches;
+  document.getElementById('mobileControls')?.classList.toggle('ready', mobile);
+  if (!mobile) requestGamePointerLock();
+  setNetStatus('LOCAL');
+});
+
+window.addEventListener('beforeunload', () => {
+  if (network) network.leave();
+});
 function startServe(side) {
   gameState = 'serve'; serveSide = side; serveSub = { phase: 'holding', timer: 0 };
 
@@ -2474,7 +3036,8 @@ function updateCamera(dt) {
   const offsetZ = Math.cos(camYaw) * camDist * cosP;
   const offsetY = CAM_HEIGHT_BASE + sinP * camDist;
 
-  const targetX = player.x, targetY = player.y + 1.5, targetZ = player.z;
+  const cameraEntity = currentControlledEntity();
+  const targetX = cameraEntity.x, targetY = cameraEntity.y + 1.5, targetZ = cameraEntity.z;
   let desiredX = targetX + offsetX;
   let desiredY = Math.max(0.2, targetY + offsetY);
   let desiredZ = targetZ + offsetZ;
@@ -2553,27 +3116,62 @@ function loop(now) {
   }
 
   if (gameState !== 'gameover') {
-    updatePlayer(dt);
-    updateBot(teammateBot, dt, homeTeam);
-    updateBot(enemyFront, dt, awayTeam);
-    updateBot(enemyBack, dt, awayTeam);
-    resolveEntityCollisions();
-    
-    if (gameState === 'serve') handleServe(dt);
-    else if (gameState === 'play') {
-      for (const e of allEntities) autoReceive(e);
-      if (ball.update(dt) === 'landed') checkLanding();
-      ball.sync();
+    if (networkEnabled && !networkHost) {
+      // Cliente invitado: no simula física; reproduce el estado autoritativo del host.
+      applyNetSnapshot(networkSnapshot, dt);
+
+      // Enviamos input a ~30 Hz para no saturar la red.
+      if (network && performance.now() - networkLastInputAt > 33) {
+        networkLastInputAt = performance.now();
+        network.sendInput(makeInputForNetworkGuest());
+      }
+    } else {
+      // Host/local: simulación completa.
+      updatePlayer(dt);
+
+      if (!networkEnabled && gameMode === 'duo') {
+        updatePlayer2(dt);
+      } else if (!networkEnabled && gameMode === 'cross') {
+        updatePlayer2(dt);
+      } else if (networkEnabled && networkHost && networkGuestSlot) {
+        updateNetworkControlledEntity(entityForSlot(networkGuestSlot), networkRemoteInput, dt);
+      }
+
+      if (!networkEnabled || networkHost) {
+        if (!(networkEnabled && networkHost && networkGuestSlot === 'home1')) {
+          updateBot(teammateBot, dt, homeTeam);
+        }
+        if (!(networkEnabled && networkHost && networkGuestSlot === 'away0')) {
+          updateBot(enemyFront, dt, awayTeam);
+        }
+        updateBot(enemyBack, dt, awayTeam);
+
+        resolveEntityCollisions();
+
+        if (gameState === 'serve') handleServe(dt);
+        else if (gameState === 'play') {
+          for (const e of allEntities) autoReceive(e);
+          if (ball.update(dt) === 'landed') checkLanding();
+          ball.sync();
+        }
+
+        const pred = (ball.y > 0.6 && ball.vy < 3 && (gameState === 'play' || (gameState === 'serve' && serveSub.phase === 'tossed'))) ? predictLanding() : null;
+        if (pred) {
+          landingMarker.visible = true; landingMarker.position.set(pred.x, 0.035, pred.z);
+          const sc = 1 + Math.sin(performance.now() / 160) * 0.22; landingMarker.scale.set(sc, 1, sc);
+        } else landingMarker.visible = false;
+
+        if (networkEnabled && networkHost && network && performance.now() - networkLastSnapshotAt > 50) {
+          networkLastSnapshotAt = performance.now();
+          network.sendSnapshot(captureNetSnapshot());
+        }
+      }
     }
-    const pred = (ball.y > 0.6 && ball.vy < 3 && (gameState === 'play' || (gameState === 'serve' && serveSub.phase === 'tossed'))) ? predictLanding() : null;
-    if (pred) {
-      landingMarker.visible = true; landingMarker.position.set(pred.x, 0.035, pred.z);
-      const s = 1 + Math.sin(performance.now() / 160) * 0.22; landingMarker.scale.set(s, 1, s);
-    } else landingMarker.visible = false;
-  } else landingMarker.visible = false;
+  } else {
+    landingMarker.visible = false;
+  }
 
   updateCamera(dt); renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
-
-updateHUD(); startServe('home'); requestAnimationFrame(loop);
+setHumanSlots(['home0']); updateHUD(); startServe('home'); startOverlay.classList.remove('hidden'); requestAnimationFrame(loop);
