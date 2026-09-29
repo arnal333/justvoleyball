@@ -4,6 +4,13 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 window.THREE = THREE;
 
+// Plataforma / controles táctiles.
+// Se detecta por soporte real de touch para cubrir Android, iOS y PCs táctiles.
+const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+const isAndroid = /Android/i.test(navigator.userAgent);
+const isMobile = isTouchDevice || isAndroid;
+
+
 
 // Local replacement for BufferGeometryUtils.mergeGeometries.
 // This keeps the game compatible with opening the HTML directly via file://.
@@ -1538,6 +1545,9 @@ let gameState = 'serve'; let serveSide = 'home'; let serveSub = { phase: 'holdin
 const keys = {};
 let clickPending = false; let setPending = false; let divePending = false;
 let sprinting = false;
+
+// Estado del joystick virtual.
+const joystickState = { x: 0, y: 0, active: false };
 let lastHitLabelTimer = 0;
 const startOverlay = document.getElementById('startOverlay');
 let pointerLocked = false;
@@ -1740,6 +1750,190 @@ const SFX = {
   }
 };
 
+
+function createMobileControls() {
+  if (!isMobile || document.getElementById('mobileHUD')) return;
+
+  const hud = document.createElement('div');
+  hud.id = 'mobileHUD';
+  hud.innerHTML = `
+    <div id="joystickZone">
+      <div id="joystickBase">
+        <div id="joystickThumb"></div>
+      </div>
+    </div>
+    <div id="actionButtons">
+      <button id="btnJump" type="button">↑</button>
+      <button id="btnSet" type="button">E</button>
+      <button id="btnDive" type="button">C</button>
+      <button id="btnHit" type="button">● GOLPEAR</button>
+    </div>
+  `;
+  document.body.appendChild(hud);
+
+  setupJoystick();
+  setupActionButtons();
+  setupCameraTouch();
+  adaptStartOverlay();
+}
+
+function setupJoystick() {
+  const base = document.getElementById('joystickBase');
+  const thumb = document.getElementById('joystickThumb');
+  if (!base || !thumb) return;
+
+  const MAX_RADIUS = 36;
+  let startX = 0, startY = 0, touchId = null;
+
+  base.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    if (!t) return;
+    touchId = t.identifier;
+    const rect = base.getBoundingClientRect();
+    startX = rect.left + rect.width / 2;
+    startY = rect.top + rect.height / 2;
+    joystickState.active = true;
+  }, { passive: false });
+
+  base.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier !== touchId) continue;
+      let dx = t.clientX - startX;
+      let dy = t.clientY - startY;
+      const dist = Math.hypot(dx, dy);
+      if (dist > MAX_RADIUS) {
+        dx = (dx / dist) * MAX_RADIUS;
+        dy = (dy / dist) * MAX_RADIUS;
+      }
+      joystickState.x = dx / MAX_RADIUS;
+      joystickState.y = dy / MAX_RADIUS;
+      thumb.style.transform =
+        `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    }
+  }, { passive: false });
+
+  const resetJoystick = () => {
+    touchId = null;
+    joystickState.x = 0;
+    joystickState.y = 0;
+    joystickState.active = false;
+    thumb.style.transform = 'translate(-50%, -50%)';
+  };
+
+  base.addEventListener('touchend', resetJoystick);
+  base.addEventListener('touchcancel', resetJoystick);
+}
+
+function setupActionButtons() {
+  const btnHit = document.getElementById('btnHit');
+  const btnSet = document.getElementById('btnSet');
+  const btnJump = document.getElementById('btnJump');
+  const btnDive = document.getElementById('btnDive');
+  if (!btnHit || !btnSet || !btnJump || !btnDive) return;
+
+  btnHit.addEventListener('touchstart', e => {
+    e.preventDefault();
+    clickPending = true;
+  }, { passive: false });
+
+  btnSet.addEventListener('touchstart', e => {
+    e.preventDefault();
+    setPending = true;
+  }, { passive: false });
+
+  btnJump.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (gameState === 'play' || gameState === 'serve') {
+      if (player.onGround) player.jump();
+    }
+  }, { passive: false });
+
+  btnDive.addEventListener('touchstart', e => {
+    e.preventDefault();
+    divePending = true;
+  }, { passive: false });
+
+  [btnHit, btnSet, btnJump, btnDive].forEach(btn => {
+    btn.addEventListener('touchend', e => e.preventDefault(), { passive: false });
+    btn.addEventListener('touchcancel', e => e.preventDefault(), { passive: false });
+  });
+}
+
+function setupCameraTouch() {
+  if (!isMobile) return;
+
+  let camTouchId = null;
+  let camLastX = 0;
+  let camLastY = 0;
+  const SENSITIVITY = 0.004;
+
+  document.addEventListener('touchstart', e => {
+    if (!startOverlay.classList.contains('hidden')) return;
+
+    for (const t of e.changedTouches) {
+      const target = e.target;
+      const enBotones = target && target.closest &&
+        target.closest('#actionButtons, #joystickZone');
+      const enMitadDerecha = t.clientX > window.innerWidth * 0.42;
+
+      if (!enBotones && enMitadDerecha && camTouchId === null) {
+        camTouchId = t.identifier;
+        camLastX = t.clientX;
+        camLastY = t.clientY;
+      }
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier !== camTouchId) continue;
+      const dx = t.clientX - camLastX;
+      const dy = t.clientY - camLastY;
+      targetYaw -= dx * SENSITIVITY;
+      targetPitch += dy * SENSITIVITY;
+      targetPitch = Math.max(-1.2, Math.min(1.4, targetPitch));
+      camLastX = t.clientX;
+      camLastY = t.clientY;
+    }
+  }, { passive: true });
+
+  const releaseCameraTouch = e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === camTouchId) camTouchId = null;
+    }
+  };
+
+  document.addEventListener('touchend', releaseCameraTouch, { passive: true });
+  document.addEventListener('touchcancel', releaseCameraTouch, { passive: true });
+}
+
+function adaptStartOverlay() {
+  if (!isMobile) return;
+
+  const keylist = document.querySelector('#startOverlay .keylist');
+  if (keylist) {
+    keylist.innerHTML = `
+      <div class="row"><kbd>Joystick izq.</kbd><span>moverte</span></div>
+      <div class="row"><kbd>Desliza derecha</kbd><span>rotar cámara</span></div>
+      <div class="row"><kbd>● GOLPEAR</kbd><span>recibir / atacar</span></div>
+      <div class="row"><kbd>E COLOCAR</kbd><span>armar alto</span></div>
+      <div class="row"><kbd>↑ SALTAR</kbd><span>para rematar en el aire</span></div>
+      <div class="row"><kbd>C DIVE</kbd><span>tirarse al suelo</span></div>
+    `;
+  }
+
+  const cta = document.querySelector('#startOverlay .cta');
+  if (cta) cta.textContent = '▶ Toca para empezar';
+
+  startOverlay.addEventListener('touchstart', () => {
+    ensureAudio();
+    if (gameState === 'gameover') restart();
+    startOverlay.classList.add('hidden');
+  }, { once: false, passive: true });
+}
+
 renderer.domElement.addEventListener('mousedown', e => { if (pointerLocked && e.button === 0) clickPending = true; });
 renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 function requestGamePointerLock() {
@@ -1752,22 +1946,29 @@ function requestGamePointerLock() {
 startOverlay.addEventListener('click', () => {
   ensureAudio();
   if (gameState === 'gameover') restart();
-  requestGamePointerLock();
+  if (!isMobile) requestGamePointerLock();
+  else startOverlay.classList.add('hidden');
 });
 renderer.domElement.addEventListener('click', () => {
   ensureAudio();
   if (gameState === 'gameover') restart();
-  requestGamePointerLock();
+  if (!isMobile) requestGamePointerLock();
 });
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === renderer.domElement;
   if (pointerLocked) startOverlay.classList.add('hidden');
   else { startOverlay.classList.remove('hidden'); clickPending = false; }
 });
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+function resizeGameViewport() {
+  const w = Math.max(1, window.innerWidth);
+  const h = Math.max(1, window.innerHeight);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', resizeGameViewport);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeGameViewport);
+resizeGameViewport();
 
 function forwardDir() { return { dx: -Math.sin(camYaw), dz: -Math.cos(camYaw) }; }
 
@@ -1985,6 +2186,13 @@ function updatePlayer(dt) {
   if (keys['d'] || keys['arrowright']) inputX += 1;
   if (keys['w'] || keys['arrowup'])    inputZ += 1;
   if (keys['s'] || keys['arrowdown'])  inputZ -= 1;
+
+  // Joystick virtual: se suma al teclado sin alterar los controles de PC.
+  if (isMobile && joystickState.active) {
+    inputX += joystickState.x;
+    inputZ -= joystickState.y;
+  }
+
   const len = Math.hypot(inputX, inputZ);
   if (len > 0) { inputX /= len; inputZ /= len; }
 
@@ -2576,4 +2784,7 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
-updateHUD(); startServe('home'); requestAnimationFrame(loop);
+updateHUD();
+startServe('home');
+createMobileControls();
+requestAnimationFrame(loop);
