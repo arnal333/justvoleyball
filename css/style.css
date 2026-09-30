@@ -319,3 +319,25 @@
     display: none;
   }
 }
+
+
+/* En móvil se muestran únicamente los controles táctiles. */
+body.is-mobile-device #subtitle,
+body.is-mobile-device #speedIndicator,
+body.is-mobile-device #controls,
+body.is-mobile-device #pcBottomControls,
+body.is-mobile-device #startOverlay .keylist {
+  display: none !important;
+}
+
+body.is-mobile-device #startOverlay .box {
+  max-width: 90vw;
+}
+
+body.is-mobile-device #startOverlay h2 {
+  margin-bottom: 24px;
+}
+
+body.is-mobile-device #startOverlay .cta {
+  margin-top: 18px;
+}
