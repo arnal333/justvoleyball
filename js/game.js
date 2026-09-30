@@ -69,7 +69,10 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x070b14);
 scene.fog = new THREE.Fog(0x070b14, 65, 150);
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 260);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  powerPreference: 'high-performance'
+});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -206,6 +209,17 @@ const arenaPoints = [
   new THREE.Vector2(-FREE_HALF_W,              FREE_HALF_L - CHAMFER_Z)
 ];
 
+const arenaEdgeData = arenaPoints.map((a, i) => {
+  const b = arenaPoints[(i + 1) % arenaPoints.length];
+  const normal = getOutwardNormal(a, b);
+  return {
+    mx: (a.x + b.x) * 0.5,
+    mz: (a.y + b.y) * 0.5,
+    nx: normal.x,
+    nz: normal.z
+  };
+});
+
 function makeArenaShape(points) {
   const shape = new THREE.Shape();
   shape.moveTo(points[0].x, points[0].y);
@@ -246,6 +260,18 @@ const mergedStepGeoB = [];
 const mergedRailGeo = [];
 // Objetos contra los que la cámara no debe atravesar (colisión de cámara).
 const cameraColliders = [];
+
+// Reutilizables para evitar allocations por frame durante la colisión de cámara.
+const cameraOrigin = new THREE.Vector3();
+const cameraDesired = new THREE.Vector3();
+const cameraToDesired = new THREE.Vector3();
+const cameraDirection = new THREE.Vector3();
+const cameraCollisionCache = {
+  valid: false,
+  targetX: 0, targetY: 0, targetZ: 0,
+  yaw: 0, pitch: 0, dist: 0,
+  x: 0, y: 0, z: 0
+};
 
 const crowdAnimations = [];
 
@@ -499,6 +525,7 @@ function addPerimeterStand(a, b, edgeIndex) {
       (r + edgeIndex) % 2 ? stadiumSeat : stadiumSeat2,
       seatsPerRow
     );
+    seats.name = 'StadiumSeatInstances';
     const dummy = new THREE.Object3D();
 
     for (let i = 0; i < seatsPerRow; i++) {
@@ -702,6 +729,78 @@ function finalizeStadiumGeometry() {
 }
 finalizeStadiumGeometry();
 
+// Consolida los InstancedMesh de asientos creados por fila.
+// No elimina ningún asiento ni cambia sus transformaciones: solo reduce batches.
+function consolidateStadiumSeats() {
+  stadiumGroup.updateMatrixWorld(true);
+
+  const sources = [];
+  stadiumGroup.traverse(o => {
+    if (o.isInstancedMesh && o.name === 'StadiumSeatInstances') sources.push(o);
+  });
+  if (!sources.length) return;
+
+  const bucketA = [];
+  const bucketB = [];
+  let totalA = 0;
+  let totalB = 0;
+
+  for (const src of sources) {
+    if (src.material === stadiumSeat) {
+      bucketA.push(src);
+      totalA += src.count;
+    } else {
+      bucketB.push(src);
+      totalB += src.count;
+    }
+  }
+
+  // El geometry original es idéntico en todos los asientos, pero cada fila creó
+  // su propio BufferGeometry. Dejamos una sola copia para liberar ese coste.
+  const combinedGeometry = sources[0].geometry.clone();
+  const tmpInstance = new THREE.Matrix4();
+
+  function buildCombined(sourceList, total, material, name) {
+    if (!total) return null;
+
+    const combined = new THREE.InstancedMesh(combinedGeometry, material, total);
+    combined.name = name;
+    combined.frustumCulled = true;
+
+    let writeIndex = 0;
+    for (const src of sourceList) {
+      src.updateMatrixWorld(true);
+      for (let i = 0; i < src.count; i++) {
+        src.getMatrixAt(i, tmpInstance);
+        tmpInstance.premultiply(src.matrixWorld);
+        combined.setMatrixAt(writeIndex++, tmpInstance);
+      }
+      src.visible = false;
+      if (src.geometry !== sources[0].geometry) src.geometry.dispose();
+    }
+
+    combined.instanceMatrix.needsUpdate = true;
+    combined.computeBoundingSphere();
+    combined.computeBoundingBox();
+    combined.matrixAutoUpdate = false;
+    combined.updateMatrix();
+    stadiumGroup.add(combined);
+    return combined;
+  }
+
+  buildCombined(bucketA, totalA, stadiumSeat, 'StadiumSeatsBatchA');
+  buildCombined(bucketB, totalB, stadiumSeat2, 'StadiumSeatsBatchB');
+
+  // El primer geometry también queda obsoleto: el batch usa su clone.
+  sources[0].geometry.dispose();
+
+  for (const src of sources) {
+    src.instanceMatrix.needsUpdate = false;
+  }
+}
+
+consolidateStadiumSeats();
+
 // El perímetro de la zona libre no lleva una línea visible.
 // Así la textura teal queda limpia alrededor de la cancha; las únicas líneas visibles
 // en el piso son las líneas reglamentarias de la cancha definidas arriba.
@@ -711,21 +810,16 @@ finalizeStadiumGeometry();
 function clampPointToArenaPolygon(entity, margin = PLAYER_R + 0.06) {
   // Varias pasadas permiten resolver correctamente las esquinas.
   for (let pass = 0; pass < 4; pass++) {
-    for (let i = 0; i < arenaPoints.length; i++) {
-      const a = arenaPoints[i];
-      const b = arenaPoints[(i + 1) % arenaPoints.length];
-      const n = getOutwardNormal(a, b);
-
-      const mx = (a.x + b.x) * 0.5;
-      const mz = (a.y + b.y) * 0.5;
+    for (let i = 0; i < arenaEdgeData.length; i++) {
+      const edge = arenaEdgeData[i];
 
       // Permitimos estar hasta "margin" hacia fuera; si se supera,
       // lo devolvemos hacia dentro del polígono.
-      const signed = n.x * (entity.x - mx) + n.z * (entity.z - mz);
+      const signed = edge.nx * (entity.x - edge.mx) + edge.nz * (entity.z - edge.mz);
       if (signed > -margin) {
         const push = signed + margin;
-        entity.x -= n.x * push;
-        entity.z -= n.z * push;
+        entity.x -= edge.nx * push;
+        entity.z -= edge.nz * push;
       }
     }
   }
@@ -823,6 +917,22 @@ for (let i = -2; i <= 2; i++) {
   scene.add(spot);
   scene.add(spot.target);
 }
+
+const poseEuler = new THREE.Euler(0, 0, 0, 'XYZ');
+const poseDeltaQuaternion = new THREE.Quaternion();
+
+// El estadio no cambia durante la partida. Congelamos sus matrices locales
+// después de construirlo para evitar trabajo de transform por frame.
+function freezeStaticStadiumMatrices(root) {
+  root.updateMatrixWorld(true);
+  root.traverse(o => {
+    if (!o.isObject3D) return;
+    o.updateMatrix();
+    o.matrixAutoUpdate = false;
+    o.matrixWorldNeedsUpdate = false;
+  });
+}
+freezeStaticStadiumMatrices(stadiumGroup);
 
 function createCharacter(opts) {
   const root = new THREE.Group();
@@ -1031,8 +1141,9 @@ class CharacterVisual3D {
   baseQ(name) { return this.base.get(name)?.q; }
   deltaEuler(name, x=0,y=0,z=0) {
     const bone=this.bone(name), base=this.baseQ(name); if(!bone||!base) return;
-    const d=new THREE.Quaternion().setFromEuler(new THREE.Euler(x,y,z,'XYZ'));
-    bone.quaternion.copy(base).multiply(d).normalize();
+    poseEuler.set(x,y,z,'XYZ');
+    poseDeltaQuaternion.setFromEuler(poseEuler);
+    bone.quaternion.copy(base).multiply(poseDeltaQuaternion).normalize();
   }
   updateActionPose(action, t) {
     const u=Math.max(0,Math.min(1,t));
@@ -1226,6 +1337,15 @@ async function init3DCharacters() {
       idle: !!characterAssets.idleClip,
       breathing: 'procedural torso + FBX arms'
     });
+
+    try {
+      const warmup = typeof renderer.compileAsync === 'function'
+        ? renderer.compileAsync(scene, camera)
+        : Promise.resolve(renderer.compile(scene, camera));
+      warmup.catch(err => console.warn('Shader warmup no disponible:', err));
+    } catch (warmErr) {
+      console.warn('No se pudo precalentar shaders:', warmErr);
+    }
   } catch(err) {
     console.error('No se pudo cargar el modelo 3D:', err);
   }
@@ -1426,39 +1546,80 @@ class Ball {
 
 // Sistema de Partículas para Remates (NUEVO)
 const particles = [];
-function emitSpikeParticles(x, y, z) {
-  const geo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
-  const mat = new THREE.MeshBasicMaterial({ color: 0xff4500 });
-  for (let i = 0; i < 15; i++) {
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, y, z);
-    scene.add(mesh);
-    particles.push({
-      mesh: mesh,
-      vx: (Math.random() - 0.5) * 12,
-      vy: (Math.random() - 0.5) * 12,
-      vz: (Math.random() - 0.5) * 12,
-      life: 1.0
+
+function makeParticlePool(count, geometry, material) {
+  const pool = [];
+  for (let i = 0; i < count; i++) {
+    const mesh = new THREE.Mesh(geometry, material.clone());
+    mesh.visible = false;
+    pool.push({
+      mesh,
+      active: false,
+      vx: 0, vy: 0, vz: 0,
+      life: 0,
+      maxLife: 1
     });
+    scene.add(mesh);
+  }
+  return pool;
+}
+
+const spikeParticleGeometry = new THREE.BoxGeometry(0.18, 0.18, 0.18);
+const spikeParticleMaterial = new THREE.MeshBasicMaterial({ color: 0xff4500 });
+const spikeParticlePool = makeParticlePool(64, spikeParticleGeometry, spikeParticleMaterial);
+
+const dustParticleGeometry = new THREE.SphereGeometry(0.08, 6, 5);
+const dustParticleMaterial = new THREE.MeshBasicMaterial({
+  color: 0xd9c9a0,
+  transparent: true,
+  opacity: 0.5
+});
+const dustParticlePool = makeParticlePool(96, dustParticleGeometry, dustParticleMaterial);
+
+function obtainParticle(pool) {
+  for (const p of pool) {
+    if (!p.active) {
+      p.active = true;
+      p.mesh.visible = true;
+      p.life = 1;
+      p.maxLife = 1;
+      return p;
+    }
+  }
+  return null;
+}
+
+function emitSpikeParticles(x, y, z) {
+  for (let i = 0; i < 15; i++) {
+    const p = obtainParticle(spikeParticlePool);
+    if (!p) break;
+    p.mesh.position.set(x, y, z);
+    p.mesh.scale.setScalar(1);
+    p.vx = (Math.random() - 0.5) * 12;
+    p.vy = (Math.random() - 0.5) * 12;
+    p.vz = (Math.random() - 0.5) * 12;
+    p.life = 1;
+    p.maxLife = 1;
+    particles.push(p);
   }
 }
 
-// Polvo de pisadas / aterrizajes: le da mucha más vida al movimiento.
 function emitDust(x, z, count = 3) {
   for (let i = 0; i < count; i++) {
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.08, 6, 5),
-      new THREE.MeshBasicMaterial({ color: 0xd9c9a0, transparent: true, opacity: 0.5 })
+    const p = obtainParticle(dustParticlePool);
+    if (!p) break;
+    p.mesh.position.set(
+      x + (Math.random() - 0.5) * 0.25,
+      0.04,
+      z + (Math.random() - 0.5) * 0.25
     );
-    mesh.position.set(x + (Math.random() - 0.5) * 0.25, 0.04, z + (Math.random() - 0.5) * 0.25);
-    scene.add(mesh);
-    particles.push({
-      mesh,
-      vx: (Math.random() - 0.5) * 1.6,
-      vy: Math.random() * 1.4 + 0.4,
-      vz: (Math.random() - 0.5) * 1.6,
-      life: 0.55
-    });
+    p.mesh.scale.setScalar(1);
+    p.vx = (Math.random() - 0.5) * 1.6;
+    p.vy = Math.random() * 1.4 + 0.4;
+    p.vz = (Math.random() - 0.5) * 1.6;
+    p.life = 0.55;
+    p.maxLife = 0.55;
+    particles.push(p);
   }
 }
 
@@ -1492,23 +1653,63 @@ const landingMarker = new THREE.Group();
   landingMarker.position.y = 0.035; landingMarker.visible = false; scene.add(landingMarker);
 }
 
+const landingPredictionCache = {
+  valid: false,
+  x: 0, y: 0, z: 0,
+  vx: 0, vy: 0, vz: 0,
+  result: null
+};
+
 function predictLanding() {
-  let x = ball.x, y = ball.y, z = ball.z;
-  let vx = ball.vx, vy = ball.vy, vz = ball.vz;
-  const dt = 0.02;
-  for (let i = 0; i < 400; i++) {
-    const py = y, pz = z, px = x;
-    vy -= GRAVITY * dt; x += vx * dt; y += vy * dt; z += vz * dt;
-    const d0 = pz, d1 = z;
-    if (d0 * d1 < 0) {
-      const t = d0 / (d0 - d1);
-      const xc = px + t * (x - px); const yc = py + t * (y - py);
-      if (Math.abs(xc) < H_COURT + 0.4 && yc < NET_H + BALL_R) return null;
-    }
-    if (Math.abs(x) > H_COURT + 3) return null;
-    if (y - BALL_R <= 0 && vy < 0) return { x, z };
+  const bx = ball.x, by = ball.y, bz = ball.z;
+  const bvx = ball.vx, bvy = ball.vy, bvz = ball.vz;
+
+  if (
+    landingPredictionCache.valid &&
+    landingPredictionCache.x === bx &&
+    landingPredictionCache.y === by &&
+    landingPredictionCache.z === bz &&
+    landingPredictionCache.vx === bvx &&
+    landingPredictionCache.vy === bvy &&
+    landingPredictionCache.vz === bvz
+  ) {
+    return landingPredictionCache.result;
   }
-  return null;
+
+  landingPredictionCache.valid = true;
+  landingPredictionCache.x = bx;
+  landingPredictionCache.y = by;
+  landingPredictionCache.z = bz;
+  landingPredictionCache.vx = bvx;
+  landingPredictionCache.vy = bvy;
+  landingPredictionCache.vz = bvz;
+  landingPredictionCache.result = null;
+
+  // y(t) = by + bvy*t - 0.5*g*t^2. Solve directly for y = BALL_R.
+  const discriminant = bvy * bvy + 2 * GRAVITY * (by - BALL_R);
+  if (discriminant < 0) return null;
+
+  const tGround = (bvy + Math.sqrt(discriminant)) / GRAVITY;
+  if (!Number.isFinite(tGround) || tGround <= 0) return null;
+
+  const xLand = bx + bvx * tGround;
+  const zLand = bz + bvz * tGround;
+
+  if (Math.abs(xLand) > H_COURT + 3) return null;
+
+  // Mantiene la regla anterior: si la trayectoria cruza la red por debajo de
+  // su altura, no se predice un aterrizaje válido.
+  if (bz * zLand < 0 && Math.abs(bvz) > 0.0001) {
+    const tNet = -bz / bvz;
+    if (tNet > 0 && tNet < tGround) {
+      const xNet = bx + bvx * tNet;
+      const yNet = by + bvy * tNet - 0.5 * GRAVITY * tNet * tNet;
+      if (Math.abs(xNet) < H_COURT + 0.4 && yNet < NET_H + BALL_R) return null;
+    }
+  }
+
+  landingPredictionCache.result = { x: xLand, z: zLand };
+  return landingPredictionCache.result;
 }
 
 // Paletas editables: cambia estos valores para crear skins/variantes rápidamente.
@@ -2036,19 +2237,45 @@ function setToward(ball, dirX, dirZ, dist = 4.0, apexHeight = 7.8) {
 }
 
 const flashes = [];
+const flashPool = Array.from({ length: 16 }, () => {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.85, 14, 10),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 })
+  );
+  mesh.visible = false;
+  scene.add(mesh);
+  return { mesh, active: false, life: 0, maxLife: 0.28 };
+});
+
 let shakeTime = 0, shakeMag = 0;
 function triggerShake(mag, dur) { shakeMag = Math.max(shakeMag, mag); shakeTime = Math.max(shakeTime, dur); }
+
 function flashCharacter(entity, color) {
-  const ring = new THREE.Mesh(new THREE.SphereGeometry(0.85, 14, 10), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.75 }));
-  ring.position.set(entity.x, entity.y + 1.0, entity.z); scene.add(ring);
-  flashes.push({ mesh: ring, life: 0.28, maxLife: 0.28 });
+  const f = flashPool.find(item => !item.active);
+  if (!f) return;
+  f.active = true;
+  f.life = f.maxLife;
+  f.mesh.material.color.setHex(color);
+  f.mesh.material.opacity = 0.75;
+  f.mesh.position.set(entity.x, entity.y + 1.0, entity.z);
+  f.mesh.scale.setScalar(1);
+  f.mesh.visible = true;
+  flashes.push(f);
 }
 function updateFlashes(dt) {
   for (let i = flashes.length - 1; i >= 0; i--) {
     const f = flashes[i]; f.life -= dt;
     const t = f.life / f.maxLife;
-    if (t <= 0) { scene.remove(f.mesh); f.mesh.geometry.dispose(); f.mesh.material.dispose(); flashes.splice(i, 1); continue; }
-    f.mesh.material.opacity = t * 0.75; f.mesh.scale.setScalar(1 + (1 - t) * 1.6);
+    if (t <= 0) {
+      f.active = false;
+      f.mesh.visible = false;
+      f.mesh.material.opacity = 0.75;
+      f.mesh.scale.setScalar(1);
+      flashes.splice(i, 1);
+      continue;
+    }
+    f.mesh.material.opacity = t * 0.75;
+    f.mesh.scale.setScalar(1 + (1 - t) * 1.6);
   }
 }
 
@@ -2693,23 +2920,56 @@ function updateCamera(dt) {
   // el estadio (paredes, gradas, muro de seguridad), acercamos la cámara
   // para que nunca atraviese geometría sólida.
   if (cameraColliders.length) {
-    const originVec = new THREE.Vector3(targetX, targetY, targetZ);
-    const desiredVec = new THREE.Vector3(desiredX, desiredY, desiredZ);
-    const toDesired = desiredVec.clone().sub(originVec);
-    const fullDist = toDesired.length();
-    if (fullDist > 0.001) {
-      const dirVec = toDesired.clone().normalize();
-      camRaycaster.set(originVec, dirVec);
-      camRaycaster.near = 0.1;
-      camRaycaster.far = fullDist;
-      const hits = camRaycaster.intersectObjects(cameraColliders, false);
-      if (hits.length > 0) {
-        const safeDist = Math.max(2.2, hits[0].distance - 0.35);
-        desiredX = targetX + dirVec.x * safeDist;
-        desiredY = targetY + dirVec.y * safeDist;
-        desiredZ = targetZ + dirVec.z * safeDist;
+    const changed =
+      !cameraCollisionCache.valid ||
+      Math.abs(cameraCollisionCache.targetX - targetX) > 0.0001 ||
+      Math.abs(cameraCollisionCache.targetY - targetY) > 0.0001 ||
+      Math.abs(cameraCollisionCache.targetZ - targetZ) > 0.0001 ||
+      Math.abs(cameraCollisionCache.yaw - camYaw) > 0.0001 ||
+      Math.abs(cameraCollisionCache.pitch - camPitch) > 0.0001 ||
+      Math.abs(cameraCollisionCache.dist - camDist) > 0.0001;
+
+    if (changed) {
+      cameraOrigin.set(targetX, targetY, targetZ);
+      cameraDesired.set(desiredX, desiredY, desiredZ);
+      cameraToDesired.copy(cameraDesired).sub(cameraOrigin);
+      const fullDist = cameraToDesired.length();
+
+      if (fullDist > 0.001) {
+        cameraDirection.copy(cameraToDesired).normalize();
+        camRaycaster.set(cameraOrigin, cameraDirection);
+        camRaycaster.near = 0.1;
+        camRaycaster.far = fullDist;
+
+        const hits = camRaycaster.intersectObjects(cameraColliders, false);
+        if (hits.length > 0) {
+          const safeDist = Math.max(2.2, hits[0].distance - 0.35);
+          cameraCollisionCache.x = targetX + cameraDirection.x * safeDist;
+          cameraCollisionCache.y = targetY + cameraDirection.y * safeDist;
+          cameraCollisionCache.z = targetZ + cameraDirection.z * safeDist;
+        } else {
+          cameraCollisionCache.x = desiredX;
+          cameraCollisionCache.y = desiredY;
+          cameraCollisionCache.z = desiredZ;
+        }
+      } else {
+        cameraCollisionCache.x = desiredX;
+        cameraCollisionCache.y = desiredY;
+        cameraCollisionCache.z = desiredZ;
       }
+
+      cameraCollisionCache.targetX = targetX;
+      cameraCollisionCache.targetY = targetY;
+      cameraCollisionCache.targetZ = targetZ;
+      cameraCollisionCache.yaw = camYaw;
+      cameraCollisionCache.pitch = camPitch;
+      cameraCollisionCache.dist = camDist;
+      cameraCollisionCache.valid = true;
     }
+
+    desiredX = cameraCollisionCache.x;
+    desiredY = cameraCollisionCache.y;
+    desiredZ = cameraCollisionCache.z;
   }
 
   const followT = 1 - Math.pow(0.0001, dt);
@@ -2731,12 +2991,24 @@ function updateCamera(dt) {
 let lastTime = performance.now();
 let fpsFrames = 0;
 let fpsWindowStart = performance.now();
+let perfLogTimer = performance.now();
 function updateFPS(now) {
   fpsFrames++;
   if (now - fpsWindowStart >= 250) {
     const fps = Math.round((fpsFrames * 1000) / (now - fpsWindowStart));
     const el = document.getElementById('fpsCounter');
     if (el) el.textContent = `FPS: ${fps}`;
+    if (now - perfLogTimer >= 5000) {
+      perfLogTimer = now;
+      const info = renderer.info;
+      console.debug('[JV PERF]', {
+        fps,
+        calls: info.render.calls,
+        triangles: info.render.triangles,
+        geometries: info.memory.geometries,
+        textures: info.memory.textures
+      });
+    }
     fpsFrames = 0;
     fpsWindowStart = now;
   }
@@ -2752,13 +3024,15 @@ function loop(now) {
     const p = particles[i];
     p.life -= dt * 1.5;
     if (p.life <= 0) {
-      scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose();
+      p.active = false;
+      p.mesh.visible = false;
+      p.mesh.scale.setScalar(1);
       particles.splice(i, 1);
     } else {
       p.mesh.position.x += p.vx * dt;
       p.mesh.position.y += p.vy * dt;
       p.mesh.position.z += p.vz * dt;
-      p.mesh.scale.setScalar(Math.max(0, p.life));
+      p.mesh.scale.setScalar(Math.max(0, p.life / p.maxLife));
     }
   }
 
