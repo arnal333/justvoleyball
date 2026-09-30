@@ -69,10 +69,10 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x070b14);
 scene.fog = new THREE.Fog(0x070b14, 65, 150);
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 260);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: !isMobile });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.25 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !isMobile;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.22;
@@ -82,8 +82,8 @@ document.body.appendChild(renderer.domElement);
 scene.add(new THREE.HemisphereLight(0xfff8e8, 0x0a1020, 1.0));
 const sun = new THREE.DirectionalLight(0xfff8e8, 2.0);
 sun.position.set(0, 35, 0);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.castShadow = !isMobile;
+sun.shadow.mapSize.set(isMobile ? 1024 : 2048, isMobile ? 1024 : 2048);
 sun.shadow.camera.left = -35; sun.shadow.camera.right = 35;
 sun.shadow.camera.top = 35; sun.shadow.camera.bottom = -35;
 sun.shadow.camera.near = 1; sun.shadow.camera.far = 90;
@@ -98,7 +98,7 @@ scene.add(sun);
 const textureLoader = new THREE.TextureLoader();
 function setupTexture(tex) {
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tex.anisotropy = isMobile ? 1 : renderer.capabilities.getMaxAnisotropy();
   tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;
   return tex;
@@ -426,7 +426,7 @@ function makeArenaBannerTexture(title, subtitle = "") {
   return new THREE.CanvasTexture(c);
 }
 
-const ARENA_ROWS = 32;
+const ARENA_ROWS = isMobile ? 18 : 32;
 const ROW_DEPTH = 0.62;
 const ROW_HEIGHT = 0.47;
 
@@ -1753,6 +1753,8 @@ const SFX = {
 
 function createMobileControls() {
   if (!isMobile || document.getElementById('mobileHUD')) return;
+
+  document.body.classList.add('is-mobile-device');
 
   const hud = document.createElement('div');
   hud.id = 'mobileHUD';
