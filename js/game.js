@@ -897,7 +897,7 @@ function createCharacter(opts) {
 
 
 // ============================================================
-// PERSONAJES 3D — rig real + RunFast + respiración retargeteada
+// PERSONAJES 3D — rig real + animación procedural hueso por hueso
 // ============================================================
 const characterAssets = {
   loaded: false,
@@ -926,27 +926,6 @@ function findCharacterBone(name, bones) {
   for (const [boneName,bone] of bones) if (normalizeBoneName(boneName) === k) return bone;
   return null;
 }
-function buildRelativeQuaternionTrack(src, targetBone, sourceRest=null) {
-  const vals = src.values, times = src.times, n = times.length;
-  if (vals.length !== n * 4) return null;
-  const q0 = sourceRest
-    ? sourceRest.clone().normalize()
-    : new THREE.Quaternion(vals[0], vals[1], vals[2], vals[3]).normalize();
-  const inv0 = q0.clone().invert();
-  const base = targetBone.quaternion.clone();
-  const out = new Float32Array(vals.length);
-  for (let i=0;i<n;i++) {
-    const q = new THREE.Quaternion(vals[i*4],vals[i*4+1],vals[i*4+2],vals[i*4+3]).normalize();
-    // Retarget en espacio local: delta = inverse(q0) * q.
-    // La versión anterior usaba q * inverse(q0), que invierte el orden
-    // de la rotación y puede dejar los brazos rígidos o en una pose aplastada.
-    const delta = inv0.clone().multiply(q).normalize();
-    const result = base.clone().multiply(delta).normalize();
-    out[i*4]=result.x; out[i*4+1]=result.y; out[i*4+2]=result.z; out[i*4+3]=result.w;
-  }
-  return new THREE.QuaternionKeyframeTrack(targetBone.name+'.quaternion', times.slice(), out);
-}
-
 class CharacterVisual3D {
   constructor(entity,sourceScene){
     this.entity=entity;this.root=new THREE.Group();this.root.name='Player3D_'+entity.team+(entity.isPlayer?'_human':'_bot');
@@ -988,118 +967,13 @@ class CharacterVisual3D {
   update(dt,e,moving,sprint){const mode=e.diveTime>0?'dive':(e.action&&e.actionTime>0?(e.action==='jumpstart'?'jumpstart':e.action):(!e.onGround?'jump':(moving?'run':'idle')));if(mode!==this.poseMode||moving!==this.lastMoving){this.poseMode=mode;this.time=0;}this.lastMoving=moving;this.time+=dt*(mode==='run'?(sprint?1.18:1):1);this.resetPose();
     if(mode==='idle')this.idle(this.time);else if(mode==='run')this.run(this.time,!!sprint);else{const p=e.action&&e.actionTime>0?Math.max(0,Math.min(1,1-e.actionTime/Math.max(.16,e.actionTime+.001))):Math.max(0,Math.min(1,(e.airTime||0)/.28));if(mode==='spike')this.spike(p);else if(mode==='receive')this.receive(p);else if(mode==='set')this.setPose(p);else if(mode==='dive')this.dive(p);else this.jump(p);}
     if(e.actionTime>0){e.actionTime-=dt;if(e.actionTime<=0)e.action=null;}const rs=e.diveTime>0?1.25:1;this.ring.scale.x+=(rs-this.ring.scale.x)*Math.min(1,dt*12);this.ring.scale.z+=(rs-this.ring.scale.z)*Math.min(1,dt*12);}
-}async function init3DCharacters() {
-  try {
-    const gltf = await new GLTFLoader().loadAsync('characters/player_base_rigged.glb?v=1.0.2');
-    characterAssets.scene = gltf.scene;
-    characterAssets.runClip = gltf.animations?.find(a => a.name === 'RunFast') || gltf.animations?.[0] || null;
-
-    // Remate externo: usamos SOLO la animación del GLB encontrado,
-    // nunca su modelo. Se retargetean los huesos principales al rig Mixamo.
-    characterAssets.spikeClip = null;
-    try {
-      const spikeGltf = await new GLTFLoader().loadAsync('characters/volleyball_spike.glb?v=1.0.3');
-      const spikeSourceBones = new Map();
-      spikeGltf.scene.traverse(o => { if (o.isBone) spikeSourceBones.set(o.name, o); });
-      const spikeMap = {
-        'Bony_lClavicleJ_081':'LeftShoulder', 'Bony_lShoulderJ_082':'LeftArm',
-        'Bony_lElbowJ_083':'LeftForeArm', 'Bony_lForearmJ_085':'LeftHand',
-        'Bony_rClavicleJ_087':'RightShoulder', 'Bony_rShoulderJ_088':'RightArm',
-        'Bony_rElbowJ_089':'RightForeArm', 'Bony_rForearmJ_091':'RightHand',
-        'Bony_Spine04J_079':'Spine2', 'Bony_Neck01J_080':'Neck', 'Bony_Neck02J_078':'Head'
-      };
-      const spikeAnim = spikeGltf.animations?.find(a => a.name === 'Take 001') || spikeGltf.animations?.[0];
-      if (spikeAnim) {
-        const ref = SkeletonUtils.clone(characterAssets.scene);
-        const targetBones = new Map();
-        ref.traverse(o => { if (o.isBone) targetBones.set(o.name, o); });
-        const tracks = [];
-        for (const track of spikeAnim.tracks) {
-          if (!track.name.endsWith('.quaternion')) continue;
-          const srcName = track.name.slice(0, track.name.lastIndexOf('.'));
-          const targetName = spikeMap[srcName];
-          const srcBone = spikeSourceBones.get(srcName);
-          const targetBone = targetName ? findCharacterBone(targetName, targetBones) : null;
-          if (!srcBone || !targetBone) continue;
-          const retargeted = buildRelativeQuaternionTrack(track, targetBone, srcBone.quaternion);
-          if (retargeted) tracks.push(retargeted);
-        }
-        if (tracks.length) {
-          characterAssets.spikeClip = new THREE.AnimationClip('Spike_External', spikeAnim.duration, tracks);
-          console.log('Remate externo cargado:', { source: spikeAnim.name, duration: spikeAnim.duration.toFixed(2), tracks: tracks.length });
-        }
-      }
-    } catch (spikeErr) {
-      console.warn('No se pudo cargar el remate externo:', spikeErr);
-    }
-
-    // Respiración hecha en el GLB por el autor.
-    // Solo retargeteamos torso + cuello + brazos para conservar la pose
-    // natural de brazos bajos sin mover piernas/cadera durante el idle.
-    characterAssets.idleClip = null;
-    const authoredBreath =
-      gltf.animations?.find(a => a.name === '01a0e9b5-245d-7292-8b3c-30fcd3ceab2a') ||
-      gltf.animations?.find(a => a.duration > 2.5 && a !== characterAssets.runClip) ||
-      null;
-
-    if (authoredBreath) {
-      const ref = SkeletonUtils.clone(characterAssets.scene);
-      const refBones = new Map();
-      ref.traverse(o => { if (o.isBone) refBones.set(o.name, o); });
-
-      // La animación fue creada sobre ESTE MISMO esqueleto del GLB.
-      // No hay que retargetear ni calcular deltas: usamos sus rotaciones
-      // originales para que la pose de brazos bajos sea exactamente la
-      // que guardaste en tu animación.
-      const allowed = new Set([
-        'spine','spine1','spine2','neck',
-        'leftshoulder','leftarm','leftforearm','lefthand',
-        'rightshoulder','rightarm','rightforearm','righthand'
-      ]);
-
-      const tracks = [];
-      for (const track of authoredBreath.tracks) {
-        if (!track.name.endsWith('.quaternion')) continue;
-        const raw = track.name.slice(0, track.name.lastIndexOf('.'));
-        const target = findCharacterBone(raw, refBones);
-        if (!target || !allowed.has(normalizeBoneName(target.name))) continue;
-
-        // Mantener el track original: mismo esqueleto, mismos nombres,
-        // misma pose inicial y misma animación hecha por el usuario.
-        tracks.push(new THREE.QuaternionKeyframeTrack(
-          target.name + '.quaternion',
-          track.times.slice(),
-          track.values.slice()
-        ));
-      }
-
-      if (tracks.length) {
-        characterAssets.idleClip = new THREE.AnimationClip(
-          'Idle_AuthoredBreathing',
-          authoredBreath.duration,
-          tracks
-        );
-        console.log('Respiración del GLB cargada:', {
-          source: authoredBreath.name,
-          duration: authoredBreath.duration.toFixed(2),
-          tracks: tracks.length
-        });
-      }
-    }
-
-    characterAssets.loaded = true;
-    for (const e of allEntities) e.attach3DCharacter();
-
-    console.log('Personajes 3D cargados:', {
-      run: !!characterAssets.runClip,
-      idle: !!characterAssets.idleClip,
-      spike: !!characterAssets.spikeClip,
-      breathing: authoredBreath ? 'GLB authored torso + arms' : 'none'
-    });
-  } catch(err) {
-    console.error('No se pudo cargar el modelo 3D:', err);
-  }
-}
+}async function init3DCharacters(){try{
+  // El GLB solo aporta la malla y el esqueleto. Ningún clip se reproduce.
+  const gltf=await new GLTFLoader().loadAsync('characters/player_base_rigged.glb?v=1.0.5');
+  characterAssets.scene=gltf.scene;characterAssets.runClip=null;characterAssets.idleClip=null;characterAssets.spikeClip=null;characterAssets.loaded=true;
+  for(const e of allEntities)e.attach3DCharacter();
+  console.log('3D: animación procedural propia, hueso por hueso.');
+}catch(err){console.error('No se pudo cargar el modelo 3D:',err);}}
 class Entity {
   constructor(opts) {
     this.x = opts.x; this.y = 0; this.z = opts.z;
