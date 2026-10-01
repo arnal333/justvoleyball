@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { GLTFLoader as _GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 window.THREE = THREE;
 
 // Plataforma / controles táctiles.
@@ -903,7 +904,8 @@ const characterAssets = {
   loaded: false,
   scene: null,
   runClip: null,
-  idleClip: null
+  idleClip: null,
+  spikeClip: null
 };
 
 const characterBoneAliases = {
@@ -925,10 +927,12 @@ function findCharacterBone(name, bones) {
   for (const [boneName,bone] of bones) if (normalizeBoneName(boneName) === k) return bone;
   return null;
 }
-function buildRelativeQuaternionTrack(src, targetBone) {
+function buildRelativeQuaternionTrack(src, targetBone, sourceRest=null) {
   const vals = src.values, times = src.times, n = times.length;
   if (vals.length !== n * 4) return null;
-  const q0 = new THREE.Quaternion(vals[0], vals[1], vals[2], vals[3]).normalize();
+  const q0 = sourceRest
+    ? sourceRest.clone().normalize()
+    : new THREE.Quaternion(vals[0], vals[1], vals[2], vals[3]).normalize();
   const inv0 = q0.clone().invert();
   const base = targetBone.quaternion.clone();
   const out = new Float32Array(vals.length);
@@ -945,7 +949,7 @@ function buildRelativeQuaternionTrack(src, targetBone) {
 }
 
 class CharacterVisual3D {
-  constructor(entity, sourceScene, runClip, idleClip) {
+  constructor(entity, sourceScene, runClip, idleClip, spikeClip) {
     this.entity = entity;
     this.root = new THREE.Group();
     this.root.name = 'Player3D_' + entity.team + (entity.isPlayer ? '_human' : '_bot');
@@ -988,7 +992,8 @@ class CharacterVisual3D {
     this.mixer = new THREE.AnimationMixer(this.model);
     this.runAction = runClip ? this.mixer.clipAction(runClip) : null;
     this.idleAction = idleClip ? this.mixer.clipAction(idleClip) : null;
-    for (const a of [this.runAction, this.idleAction]) {
+    this.spikeAction = spikeClip ? this.mixer.clipAction(spikeClip) : null;
+    for (const a of [this.runAction, this.idleAction, this.spikeAction]) {
       if (a) { a.setLoop(THREE.LoopRepeat, Infinity); a.enabled = false; }
     }
     // Arrancamos sin modo para obligar a setMode('idle') a reproducir
@@ -1009,6 +1014,7 @@ class CharacterVisual3D {
   stopActions() {
     if (this.runAction) { this.runAction.stop(); this.runAction.enabled=false; }
     if (this.idleAction) { this.idleAction.stop(); this.idleAction.enabled=false; }
+    if (this.spikeAction) { this.spikeAction.stop(); this.spikeAction.enabled=false; }
     this.resetPose();
   }
   setIdleClip(idleClip) {
@@ -1027,6 +1033,10 @@ class CharacterVisual3D {
       this.runAction.reset(); this.runAction.enabled=true; this.runAction.timeScale=speed; this.runAction.play();
     } else if (mode === 'idle' && this.idleAction) {
       this.idleAction.reset(); this.idleAction.enabled=true; this.idleAction.timeScale=1; this.idleAction.play();
+    } else if (mode === 'spike' && this.spikeAction) {
+      this.spikeAction.reset(); this.spikeAction.enabled=true;
+      this.spikeAction.timeScale = this.spikeAction.getClip().duration / 0.9;
+      this.spikeAction.play();
     }
   }
   bone(name) { return this.bones.get(name); }
@@ -1120,9 +1130,10 @@ class CharacterVisual3D {
 
     if (mode==='run') this.setMode('run', sprintFactor ? 1.12 : 0.78);
     else if (mode==='idle') this.setMode('idle');
+    else if (mode==='spike' && this.spikeAction) this.setMode('spike', 1, true);
     else this.stopActions();
 
-    if (mode==='run' || mode==='idle') {
+    if (mode==='run' || mode==='idle' || (mode==='spike' && this.spikeAction)) {
       if (this.mixer) this.mixer.update(dt);
     } else {
       const progress = entity.action && entity.actionTime > 0
@@ -1151,6 +1162,45 @@ async function init3DCharacters() {
     const gltf = await new GLTFLoader().loadAsync('characters/player_base_rigged.glb?v=1.0.2');
     characterAssets.scene = gltf.scene;
     characterAssets.runClip = gltf.animations?.find(a => a.name === 'RunFast') || gltf.animations?.[0] || null;
+
+    // Remate externo: usamos SOLO la animación del GLB encontrado,
+    // nunca su modelo. Se retargetean los huesos principales al rig Mixamo.
+    characterAssets.spikeClip = null;
+    try {
+      const spikeGltf = await new GLTFLoader().loadAsync('characters/volleyball_spike.glb?v=1.0.3');
+      const spikeSourceBones = new Map();
+      spikeGltf.scene.traverse(o => { if (o.isBone) spikeSourceBones.set(o.name, o); });
+      const spikeMap = {
+        'Bony_lClavicleJ_081':'LeftShoulder', 'Bony_lShoulderJ_082':'LeftArm',
+        'Bony_lElbowJ_083':'LeftForeArm', 'Bony_lForearmJ_085':'LeftHand',
+        'Bony_rClavicleJ_087':'RightShoulder', 'Bony_rShoulderJ_088':'RightArm',
+        'Bony_rElbowJ_089':'RightForeArm', 'Bony_rForearmJ_091':'RightHand',
+        'Bony_Spine04J_079':'Spine2', 'Bony_Neck01J_080':'Neck', 'Bony_Neck02J_078':'Head'
+      };
+      const spikeAnim = spikeGltf.animations?.find(a => a.name === 'Take 001') || spikeGltf.animations?.[0];
+      if (spikeAnim) {
+        const ref = SkeletonUtils.clone(characterAssets.scene);
+        const targetBones = new Map();
+        ref.traverse(o => { if (o.isBone) targetBones.set(o.name, o); });
+        const tracks = [];
+        for (const track of spikeAnim.tracks) {
+          if (!track.name.endsWith('.quaternion')) continue;
+          const srcName = track.name.slice(0, track.name.lastIndexOf('.'));
+          const targetName = spikeMap[srcName];
+          const srcBone = spikeSourceBones.get(srcName);
+          const targetBone = targetName ? findCharacterBone(targetName, targetBones) : null;
+          if (!srcBone || !targetBone) continue;
+          const retargeted = buildRelativeQuaternionTrack(track, targetBone, srcBone.quaternion);
+          if (retargeted) tracks.push(retargeted);
+        }
+        if (tracks.length) {
+          characterAssets.spikeClip = new THREE.AnimationClip('Spike_External', spikeAnim.duration, tracks);
+          console.log('Remate externo cargado:', { source: spikeAnim.name, duration: spikeAnim.duration.toFixed(2), tracks: tracks.length });
+        }
+      }
+    } catch (spikeErr) {
+      console.warn('No se pudo cargar el remate externo:', spikeErr);
+    }
 
     // Respiración hecha en el GLB por el autor.
     // Solo retargeteamos torso + cuello + brazos para conservar la pose
@@ -1212,6 +1262,7 @@ async function init3DCharacters() {
     console.log('Personajes 3D cargados:', {
       run: !!characterAssets.runClip,
       idle: !!characterAssets.idleClip,
+      spike: !!characterAssets.spikeClip,
       breathing: authoredBreath ? 'GLB authored torso + arms' : 'none'
     });
   } catch(err) {
@@ -1255,7 +1306,7 @@ class Entity {
   attach3DCharacter() {
     if (this.visual3D || !characterAssets.loaded) return;
     scene.remove(this.mesh);
-    this.visual3D = new CharacterVisual3D(this, characterAssets.scene, characterAssets.runClip, characterAssets.idleClip);
+    this.visual3D = new CharacterVisual3D(this, characterAssets.scene, characterAssets.runClip, characterAssets.idleClip, characterAssets.spikeClip);
     this.mesh = this.visual3D.root;
     this.mesh.position.set(this.x,this.y,this.z);
     this.mesh.rotation.y=this.facingYaw;
@@ -2123,7 +2174,7 @@ function entityHit(entity, isSet, dirX, dirZ) {
     if (gameState === 'serve') ball.serveLocked = false;
     flashCharacter(entity, flashColor); 
     entity.action = isSet ? 'set' : (isSpike ? 'spike' : 'receive');
-    entity.actionTime = 0.4;
+    entity.actionTime = isSpike ? 0.9 : 0.4;
     if (isSpike) triggerShake(0.22, 0.2);
     return true; 
   }
@@ -2492,7 +2543,7 @@ function updateBot(bot, dt, teammates) {
       const hitType = isSpike ? 'spike' : (wasOwnSecondTouch ? 'set' : 'receive');
       registerHit(bot, hitType);
       bot.action = isSpike ? 'spike' : (wasOwnSecondTouch ? 'set' : 'receive');
-      bot.actionTime = 0.4;
+      bot.actionTime = isSpike ? 0.9 : 0.4;
       if (isSpike) triggerShake(0.22, 0.2);
     }
   }
