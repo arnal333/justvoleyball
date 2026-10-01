@@ -991,7 +991,9 @@ class CharacterVisual3D {
     for (const a of [this.runAction, this.idleAction]) {
       if (a) { a.setLoop(THREE.LoopRepeat, Infinity); a.enabled = false; }
     }
-    this.mode = 'idle';
+    // Arrancamos sin modo para obligar a setMode('idle') a reproducir
+    // la animación authored desde el primer frame.
+    this.mode = null;
     this.runSpeed = 1;
     this.lastMoving = false;
     this.poseMode = 'idle';
