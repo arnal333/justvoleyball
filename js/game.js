@@ -943,7 +943,7 @@ class CharacterVisual3D {
   resetPose(){for(const[n,b]of this.bones){const x=this.base.get(n);if(x){b.quaternion.copy(x.q);b.position.copy(x.p);b.scale.copy(x.s);}}}
   rot(n,x=0,y=0,z=0){const b=this.bone(n),x0=b&&this.base.get(b.name);if(!b||!x0)return;this.e.set(x,y,z,'XYZ');this.q.setFromEuler(this.e);b.quaternion.copy(x0.q).multiply(this.q).normalize();}
   fingers(side,curl=0,spread=0){const s=side.toLowerCase();for(const[n,b]of this.bones){const k=normalizeBoneName(n);if(!k.startsWith(s)||!k.includes('hand')||!/(index|middle|ring|pinky|thumb|finger|end)/.test(k))continue;const x0=this.base.get(n);if(!x0)continue;this.e.set((k.endsWith('end')?.08:.16)*curl,spread*(k.includes('thumb')?.4:k.includes('index')?-.15:.05),0,'XYZ');this.q.setFromEuler(this.e);b.quaternion.copy(x0.q).multiply(this.q).normalize();}}
-  idle(t){const b=.5+.5*Math.sin(t*1.8),s=Math.sin(t*.9);this.rot('Spine',-.018*b,.006*s);this.rot('Spine01',-.028*b,.009*s);this.rot('Spine02',-.032*b,.011*s);this.rot('Neck',.012*b,-.008*s);this.rot('Head',.008*b,-.012*s);
+  idle(t){const b=.5+.5*Math.sin(t*1.8),s=Math.sin(t*.9);this.rot('Spine',-.018*b,.006*s);this.rot('Spine1',-.028*b,.009*s);this.rot('Spine2',-.032*b,.011*s);this.rot('Neck',.012*b,-.008*s);this.rot('Head',.008*b,-.012*s);
     this.rot('LeftShoulder',.02,0,-.045);this.rot('LeftArm',.02+.018*b,.015,-.24-.025*b);this.rot('LeftForeArm',.08+.025*b,0,-.08);this.rot('LeftHand',.02,0,-.03);this.rot('RightShoulder',.02,0,.045);this.rot('RightArm',.02+.018*b,-.015,.24+.025*b);this.rot('RightForeArm',.08+.025*b,0,.08);this.rot('RightHand',.02,0,.03);
     this.rot('LeftUpLeg',-.02);this.rot('LeftLeg',.045);this.rot('LeftFoot',-.015);this.rot('RightUpLeg',-.02);this.rot('RightLeg',.045);this.rot('RightFoot',-.015);this.fingers('left',.08,.07);this.fingers('right',.08,-.07);}
   run(t,sp){const f=7.2+(sp?1.6:0),a=Math.sin(t*f),b=Math.sin(t*f+Math.PI),lift=Math.abs(a),lean=sp?-.16:-.12;this.rot('Spine',lean,.035*a);this.rot('Spine01',lean*1.12,.045*a);this.rot('Spine02',lean*.78,.055*a);this.rot('Neck',-.025,.018*a);this.rot('Head',.018,-.014*a);
@@ -952,6 +952,42 @@ class CharacterVisual3D {
   jump(u){const x=Math.max(0,Math.min(1,u/.28)),rise=Math.sin(Math.PI*x),load=Math.max(0,1-x/.55),up=Math.max(0,Math.min(1,(x-.18)/.82)),swing=Math.sin(Math.PI*Math.max(0,Math.min(1,(x-.03)/.97)));this.rot('Spine',-.08*load+.045*up,.025*Math.sin(Math.PI*x));this.rot('Spine01',-.14*load+.06*up,.035*Math.sin(Math.PI*x));this.rot('Spine02',-.11*load+.05*up,.045*Math.sin(Math.PI*x));this.rot('Neck',.025*rise,-.012*Math.sin(Math.PI*x));this.rot('Head',.018*rise,-.016*Math.sin(Math.PI*x));
     const arm=-.30-.72*swing+.22*up;this.rot('LeftShoulder',-.08*swing,.025,.10*swing);this.rot('LeftArm',arm,.05,-.16-.10*swing);this.rot('LeftForeArm',-.10-.28*swing+.12*up,0,-.06);this.rot('LeftHand',-.04*swing,0,-.04);this.rot('RightShoulder',-.08*swing,-.025,-.10*swing);this.rot('RightArm',arm,-.05,.16+.10*swing);this.rot('RightForeArm',-.10-.28*swing+.12*up,0,.06);this.rot('RightHand',-.04*swing,0,.04);
     this.rot('LeftUpLeg',.38*load+.08*up);this.rot('LeftLeg',-.58*load-.22*up);this.rot('LeftFoot',.08*up);this.rot('RightUpLeg',.38*load+.08*up);this.rot('RightLeg',-.58*load-.22*up);this.rot('RightFoot',.08*up);this.fingers('left',.10+.10*rise,.10);this.fingers('right',.10+.10*rise,-.10);}
+  jumpRun(u){
+    // Salto con carrera: carga progresiva -> extensión -> vuelo.
+    // La pose está diseñada para preparar el remate: cadera/torso inician la cadena,
+    // brazo derecho queda cargado atrás y el izquierdo estabiliza.
+    const t=Math.max(0,Math.min(1,u));
+    const load=Math.max(0,Math.min(1,t/.26));
+    const rise=Math.max(0,Math.min(1,(t-.20)/.48));
+    const apex=Math.max(0,Math.min(1,(t-.48)/.32));
+    const settle=Math.max(0,Math.min(1,(t-.80)/.20));
+    const ease=x=>x*x*(3-2*x);
+    const L=ease(load),R=ease(rise),A=ease(apex),S=ease(settle);
+    this.rot('Hips',-.10*L+.06*R,.06*L+.08*R,.0);
+    this.rot('Spine',.10*L-.06*R+.03*S,.02*L+.06*R);
+    this.rot('Spine1',.14*L-.10*R+.04*S,.03*L+.08*R);
+    this.rot('Spine2',.11*L-.13*R+.05*S,.04*L+.10*R);
+    this.rot('Neck',-.06*L+.03*R,-.04*R);
+    this.rot('Head',-.10*L+.02*R,-.05*R);
+    // Brazo derecho: carga atrás, codo alto, luego sube con el cuerpo.
+    this.rot('RightShoulder',-.12*L-.22*R+.10*A,0,.10*L+.05*R);
+    this.rot('RightArm',.35*L+.95*R+.12*A,-.10*L,.20*L+.28*R);
+    this.rot('RightForeArm',-1.05*L-.35*R+.25*A,0,.06*L);
+    this.rot('RightHand',-.12*L+.04*R,0,.08*L);
+    // Brazo izquierdo: apunta/estabiliza y empieza a abrirse al final del salto.
+    this.rot('LeftShoulder',-.08*L-.16*R+.08*A,0,-.08*L);
+    this.rot('LeftArm',.20*L+.42*R+.08*A,.08*L,-.14*L-.10*R);
+    this.rot('LeftForeArm',-.22*L-.08*R+.18*A,0,-.04*L);
+    this.rot('LeftHand',-.04*L+.03*A,0,-.05);
+    // Piernas: carrera -> compresión -> extensión -> vuelo.
+    this.rot('LeftUpLeg',.22*L-.42*R+.10*S,.02);
+    this.rot('RightUpLeg',.26*L-.48*R+.10*S,-.02);
+    this.rot('LeftLeg',-.42*L+.58*R-.18*S);
+    this.rot('RightLeg',-.46*L+.64*R-.18*S);
+    this.rot('LeftFoot',.08*L-.12*R+.06*S);
+    this.rot('RightFoot',.08*L-.12*R+.06*S);
+    this.fingers('left',.10+.08*R,.10);this.fingers('right',.12+.10*R,-.10);
+  }
   spike(u){const t=Math.max(0,Math.min(1,u)),prep=Math.max(0,Math.min(1,t/.34)),hit=Math.max(0,Math.min(1,(t-.34)/.24)),follow=Math.max(0,Math.min(1,(t-.58)/.42)),p2=prep*(1-hit),h=hit*(1-follow);this.rot('Spine',.10*p2-.20*h+.11*follow,.10*p2+.14*h);this.rot('Spine01',.18*p2-.30*h+.15*follow,.15*p2+.20*h);this.rot('Spine02',.22*p2-.37*h+.18*follow,.18*p2+.24*h);this.rot('Neck',-.035*p2+.06*h,-.07*h);this.rot('Head',-.025*p2+.05*h,-.08*h);
     this.rot('LeftShoulder',-.10*p2+.12*follow,0,-.08*p2);this.rot('LeftArm',-.62*p2+.55*follow,.10*p2,-.18*p2+.12*follow);this.rot('LeftForeArm',-.18*p2-.35*follow,0,-.08-.05*follow);this.rot('LeftHand',-.05*p2-.10*follow,0,-.04);
     this.rot('RightShoulder',-.22*p2+.14*h,0,.10*p2);this.rot('RightArm',.82*p2-2.45*h-.72*follow,-.18*p2,-.18*p2+.14*h);this.rot('RightForeArm',-1.45*p2+1.10*h-.32*follow,0,.10*h);this.rot('RightHand',-.34*p2+.48*h-.18*follow,0,.10);
@@ -962,7 +998,7 @@ class CharacterVisual3D {
     this.rot('LeftShoulder',-.15*a,0,.1*a);this.rot('LeftArm',-1.35*a,.08*a,.12*a);this.rot('LeftForeArm',-.85*a,0,.05*a);this.rot('LeftHand',-.12*a,0,.06*a);this.rot('RightShoulder',-.15*a,0,-.1*a);this.rot('RightArm',-1.35*a,-.08*a,-.12*a);this.rot('RightForeArm',-.85*a,0,-.05*a);this.rot('RightHand',-.12*a,0,-.06*a);this.rot('LeftUpLeg',-.12*a);this.rot('RightUpLeg',-.12*a);this.fingers('left',.35,.15);this.fingers('right',.35,-.15);}
   dive(u){const a=Math.min(1,u*3);this.rot('Spine',.45*a);this.rot('Spine01',.55*a);this.rot('Spine02',.35*a);this.rot('Neck',-.1*a);this.rot('Head',-.12*a);this.rot('LeftArm',-1.15*a,.12*a,.15*a);this.rot('LeftForeArm',-.35*a,0,.08);this.rot('RightArm',-1.15*a,-.12*a,-.15*a);this.rot('RightForeArm',-.35*a,0,-.08);this.rot('LeftUpLeg',-.2*a);this.rot('RightUpLeg',-.2*a);this.rot('LeftLeg',.35*a);this.rot('RightLeg',.35*a);this.fingers('left',.18,.2);this.fingers('right',.18,-.2);}
   update(dt,e,moving,sprint){const mode=e.diveTime>0?'dive':(e.action&&e.actionTime>0?(e.action==='jumpstart'?'jumpstart':e.action):(!e.onGround?'jump':(moving?'run':'idle')));if(mode!==this.poseMode||moving!==this.lastMoving){this.poseMode=mode;this.time=0;}this.lastMoving=moving;this.time+=dt*(mode==='run'?(sprint?1.18:1):1);this.resetPose();
-    if(mode==='idle')this.idle(this.time);else if(mode==='run')this.run(this.time,!!sprint);else{const p=e.action&&e.actionTime>0?Math.max(0,Math.min(1,1-e.actionTime/Math.max(.16,e.actionTime+.001))):Math.max(0,Math.min(1,(e.airTime||0)/.28));if(mode==='spike')this.spike(p);else if(mode==='receive')this.receive(p);else if(mode==='set')this.setPose(p);else if(mode==='dive')this.dive(p);else this.jump(p);}
+    if(mode==='idle')this.idle(this.time);else if(mode==='run')this.run(this.time,!!sprint);else{const p=e.action&&e.actionTime>0?Math.max(0,Math.min(1,1-e.actionTime/Math.max(.16,e.actionTime+.001))):Math.max(0,Math.min(1,(e.airTime||0)/.28));if(mode==='spike')this.spike(p);else if(mode==='receive')this.receive(p);else if(mode==='set')this.setPose(p);else if(mode==='dive')this.dive(p);else if(mode==='jumpstart' && e.jumpFromRun)this.jumpRun(p);else this.jump(p);}
     if(e.actionTime>0){e.actionTime-=dt;if(e.actionTime<=0)e.action=null;}const rs=e.diveTime>0?1.25:1;this.ring.scale.x+=(rs-this.ring.scale.x)*Math.min(1,dt*12);this.ring.scale.z+=(rs-this.ring.scale.z)*Math.min(1,dt*12);}
 }async function init3DCharacters(){try{
   // El GLB solo aporta la malla y el esqueleto. Ningún clip se reproduce.
@@ -995,6 +1031,7 @@ class Entity {
     
     this.action = null; 
     this.actionTime = 0;
+    this.jumpFromRun = false;
 
     this.mesh = new THREE.Group();
     this.mesh.name = 'PlayerPlaceholder';
@@ -1017,8 +1054,9 @@ class Entity {
     this.mesh.position.set(this.x, this.y, this.z);
     this.mesh.rotation.y = this.facingYaw;
   }
-  jump() {
+  jump(fromRun = false) {
     if (!this.onGround || this.diveTime > 0) return false;
+    this.jumpFromRun = !!fromRun;
     if (this.wasMoving) SFX.moveStop();
     this.vy = 8.8; this.onGround = false; this.airTime = 0;
     this.action = 'jumpstart'; this.actionTime = 0.16;
@@ -1588,7 +1626,7 @@ function setupActionButtons() {
   btnJump.addEventListener('touchstart', e => {
     e.preventDefault();
     if (gameState === 'play' || gameState === 'serve') {
-      if (player.onGround) player.jump();
+      if (player.onGround) player.jump(player.wasMoving || joystickState.active);
     }
   }, { passive: false });
 
@@ -1976,7 +2014,7 @@ function updatePlayer(dt) {
     // El jugador se mantiene dentro del anillo libre de 1 m y nunca entra a las gradas.
     clampPointToArenaPolygon(player, player.radius + 0.08);
     player.z = Math.max(0.7, Math.min(FREE_HALF_L - player.radius, player.z));
-    if (keys[' '] && player.onGround) player.jump();
+    if (keys[' '] && player.onGround) player.jump(len > 0);
     if (len > 0) player.targetFacingYaw = Math.atan2(-mvx, -mvz);
     else player.targetFacingYaw = camYaw;
   }
