@@ -1100,35 +1100,8 @@ class CharacterVisual3D {
     }
   }
   applyBreathing(dt) {
-    // Respiración procedural: SOLO torso y cuello.
-    // No toca hombros, brazos, antebrazos ni manos.
-    this.breathTime = (this.breathTime || 0) + dt;
-    const phase = this.breathTime * 1.65;
-    const inhale = (Math.sin(phase) + 1) * 0.5;
-    const smooth = inhale * inhale * (3 - 2 * inhale);
-
-    // Muy leve expansión/contracción del pecho.
-    const spine = this.bone('Spine');
-    const spine01 = this.bone('Spine01');
-    const spine02 = this.bone('Spine02');
-    const neck = this.bone('neck');
-
-    if (spine) this.deltaEuler('Spine', 0.010 * smooth, 0, 0);
-    if (spine01) this.deltaEuler('Spine01', -0.028 * smooth, 0, 0);
-    if (spine02) this.deltaEuler('Spine02', -0.042 * smooth, 0, 0);
-    if (neck) this.deltaEuler('neck', 0.012 * smooth, 0, 0);
-
-    // Expansión visual mínima, sin afectar posición ni hitbox.
-    const chest = spine02 || spine01 || spine;
-    if (chest) {
-      const b = this.base.get(chest.name);
-      if (b) {
-        chest.scale.copy(b.s);
-        const expand = 1 + 0.012 * smooth;
-        chest.scale.x *= expand;
-        chest.scale.z *= expand;
-      }
-    }
+    // La respiración ahora proviene de la animación authored del GLB.
+    // Se conserva este método solo por compatibilidad.
   }
   update(dt, entity, moving, sprintFactor) {
     let mode;
@@ -1149,7 +1122,6 @@ class CharacterVisual3D {
 
     if (mode==='run' || mode==='idle') {
       if (this.mixer) this.mixer.update(dt);
-      if (mode === 'idle') this.applyBreathing(dt);
     } else {
       const progress = entity.action && entity.actionTime > 0
         ? 1 - Math.max(0, entity.actionTime / this.poseDuration)
@@ -1178,59 +1150,63 @@ async function init3DCharacters() {
     characterAssets.scene = gltf.scene;
     characterAssets.runClip = gltf.animations?.find(a => a.name === 'RunFast') || gltf.animations?.[0] || null;
 
-    // La animación de respiración sí se usa para los BRAZOS:
-    // queremos que el clip sea quien haga bajar los brazos al volver a idle.
-    // Filtramos el FBX para NO imponer su pose de torso, piernas, etc.
+    // Respiración hecha en el GLB por el autor.
+    // Solo retargeteamos torso + cuello + brazos para conservar la pose
+    // natural de brazos bajos sin mover piernas/cadera durante el idle.
     characterAssets.idleClip = null;
-    try {
-      const fbx = await new FBXLoader().loadAsync('characters/respiracion.fbx');
-      const srcClip = fbx.animations?.[0];
-      if (srcClip) {
-        const ref = SkeletonUtils.clone(characterAssets.scene);
-        const refBones = new Map();
-        ref.traverse(o => { if (o.isBone) refBones.set(o.name, o); });
+    const authoredBreath =
+      gltf.animations?.find(a => a.name === '01a0e9b5-245d-7292-8b3c-30fcd3ceab2a') ||
+      gltf.animations?.find(a => a.duration > 2.5 && a !== characterAssets.runClip) ||
+      null;
 
-        const allowed = new Set([
-          'LeftShoulder','RightShoulder',
-          'LeftArm','RightArm',
-          'LeftForeArm','RightForeArm',
-          'LeftHand','RightHand'
-        ]);
-        const tracks = [];
-        for (const track of srcClip.tracks) {
-          if (!track.name.endsWith('.quaternion')) continue;
-          const raw = track.name.slice(0, track.name.lastIndexOf('.'));
-          const target = findCharacterBone(raw, refBones);
-          if (!target || !allowed.has(target.name)) continue;
-          const mapped = buildRelativeQuaternionTrack(track, target);
-          if (mapped) tracks.push(mapped);
-        }
+    if (authoredBreath) {
+      const ref = SkeletonUtils.clone(characterAssets.scene);
+      const refBones = new Map();
+      ref.traverse(o => { if (o.isBone) refBones.set(o.name, o); });
 
-        if (tracks.length) {
-          characterAssets.idleClip = new THREE.AnimationClip(
-            'Idle_Arms_Lower',
-            srcClip.duration,
-            tracks
-          );
-          console.log('Animación idle de brazos cargada:', tracks.length, 'tracks');
-        }
+      const allowed = new Set([
+        'Spine','Spine1','Spine2','Neck',
+        'LeftShoulder','LeftArm','LeftForeArm','LeftHand',
+        'RightShoulder','RightArm','RightForeArm','RightHand'
+      ]);
+
+      const tracks = [];
+      for (const track of authoredBreath.tracks) {
+        if (!track.name.endsWith('.quaternion')) continue;
+        const raw = track.name.slice(0, track.name.lastIndexOf('.'));
+        const target = findCharacterBone(raw, refBones);
+        if (!target || !allowed.has(target.name)) continue;
+
+        const mapped = buildRelativeQuaternionTrack(track, target);
+        if (mapped) tracks.push(mapped);
       }
-    } catch (idleErr) {
-      console.warn('No se pudo cargar respiracion.fbx; se mantiene respiración procedural:', idleErr);
+
+      if (tracks.length) {
+        characterAssets.idleClip = new THREE.AnimationClip(
+          'Idle_AuthoredBreathing',
+          authoredBreath.duration,
+          tracks
+        );
+        console.log('Respiración del GLB cargada:', {
+          source: authoredBreath.name,
+          duration: authoredBreath.duration.toFixed(2),
+          tracks: tracks.length
+        });
+      }
     }
 
     characterAssets.loaded = true;
     for (const e of allEntities) e.attach3DCharacter();
+
     console.log('Personajes 3D cargados:', {
       run: !!characterAssets.runClip,
       idle: !!characterAssets.idleClip,
-      breathing: 'procedural torso + FBX arms'
+      breathing: authoredBreath ? 'GLB authored torso + arms' : 'none'
     });
   } catch(err) {
     console.error('No se pudo cargar el modelo 3D:', err);
   }
 }
-
 class Entity {
   constructor(opts) {
     this.x = opts.x; this.y = 0; this.z = opts.z;
