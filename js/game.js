@@ -943,21 +943,73 @@ class CharacterVisual3D {
   resetPose(){for(const[n,b]of this.bones){const x=this.base.get(n);if(x){b.quaternion.copy(x.q);b.position.copy(x.p);b.scale.copy(x.s);}}}
   rot(n,x=0,y=0,z=0){const b=this.bone(n),x0=b&&this.base.get(b.name);if(!b||!x0)return;this.e.set(x,y,z,'XYZ');this.q.setFromEuler(this.e);b.quaternion.copy(x0.q).multiply(this.q).normalize();}
   fingers(side,curl=0,spread=0){const s=side.toLowerCase();for(const[n,b]of this.bones){const k=normalizeBoneName(n);if(!k.startsWith(s)||!k.includes('hand')||!/(index|middle|ring|pinky|thumb|finger|end)/.test(k))continue;const x0=this.base.get(n);if(!x0)continue;this.e.set((k.endsWith('end')?.08:.16)*curl,spread*(k.includes('thumb')?.4:k.includes('index')?-.15:.05),0,'XYZ');this.q.setFromEuler(this.e);b.quaternion.copy(x0.q).multiply(this.q).normalize();}}
-  idle(t){const b=.5+.5*Math.sin(t*2.2),s=Math.sin(t*1.1);this.rot('Spine',-.025*b,.008*s);this.rot('Spine01',-.04*b,.012*s);this.rot('Spine02',-.045*b,.014*s);this.rot('Neck',.018*b,-.012*s);this.rot('Head',.012*b,-.018*s);
-    this.rot('LeftShoulder',.02,0,.035);this.rot('LeftArm',.12+.015*b,.02,.055);this.rot('LeftForeArm',-.08+.02*b,0,.02);this.rot('LeftHand',.02,0,.03);
-    this.rot('RightShoulder',.02,0,-.035);this.rot('RightArm',.12+.015*b,-.02,-.055);this.rot('RightForeArm',-.08+.02*b,0,-.02);this.rot('RightHand',.02,0,-.03);
-    this.rot('LeftUpLeg',-.025);this.rot('LeftLeg',.055);this.rot('LeftFoot',-.018);this.rot('RightUpLeg',-.025);this.rot('RightLeg',.055);this.rot('RightFoot',-.018);this.fingers('left',.1,.08);this.fingers('right',.1,-.08);}
-  run(t,sp){const f=8+(sp?1.5:0),a=Math.sin(t*f),b=Math.sin(t*f+Math.PI);this.rot('Spine',-.08,.035*a);this.rot('Spine01',-.1,.045*a);this.rot('Spine02',-.08,.055*a);
-    this.rot('LeftArm',.55*a,.02,.05);this.rot('LeftForeArm',-.25+.12*Math.abs(a),0,.02);this.rot('LeftHand',.05*a,0,.03);this.rot('RightArm',.55*b,-.02,-.05);this.rot('RightForeArm',-.25+.12*Math.abs(b),0,-.02);this.rot('RightHand',.05*b,0,-.03);
-    this.rot('LeftUpLeg',-.75*b);this.rot('LeftLeg',.85*Math.max(0,a));this.rot('LeftFoot',-.25*Math.max(0,-a));this.rot('RightUpLeg',-.75*a);this.rot('RightLeg',.85*Math.max(0,b));this.rot('RightFoot',-.25*Math.max(0,-b));this.fingers('left',.22,.05);this.fingers('right',.22,-.05);}
-  jump(u){const p=Math.max(0,1-u/.22),a=Math.sin(Math.PI*Math.min(1,u)),f=Math.max(0,(u-.55)/.45),l=.35+.55*a;this.rot('Spine',-.12*p+.1*f);this.rot('Spine01',-.22*p+.12*f);this.rot('Spine02',-.2*p+.1*f);this.rot('Neck',.035*a);this.rot('Head',.025*a);
-    this.rot('LeftArm',-.75*l,.04,.1);this.rot('LeftForeArm',-.35*l,0,.03);this.rot('LeftHand',-.05*a,0,.04);this.rot('RightArm',-.75*l,-.04,-.1);this.rot('RightForeArm',-.35*l,0,-.03);this.rot('RightHand',-.05*a,0,-.04);
-    this.rot('LeftUpLeg',.35*p+.12*f);this.rot('LeftLeg',-.5*p-.3*f);this.rot('LeftFoot',.1*f);this.rot('RightUpLeg',.35*p+.12*f);this.rot('RightLeg',-.5*p-.3*f);this.rot('RightFoot',.1*f);this.fingers('left',.12,.12);this.fingers('right',.12,-.12);}
-  spike(u){const back=Math.min(1,u/.3)*(1-Math.max(0,Math.min(1,(u-.3)/.22))),hit=Math.max(0,Math.min(1,(u-.3)/.22)),f=Math.max(0,Math.min(1,(u-.52)/.48));
-    this.rot('Spine',.1*back-.18*hit+.12*f,.1*hit);this.rot('Spine01',.18*back-.28*hit+.15*f,.14*hit);this.rot('Spine02',.2*back-.34*hit+.16*f,.18*hit);this.rot('Neck',-.05*back+.08*hit,-.08*hit);this.rot('Head',-.04*back+.06*hit,-.1*hit);
-    this.rot('LeftShoulder',-.05*back,0,.12*back);this.rot('LeftArm',-.95*back-.55*f,.12*back,.16*back);this.rot('LeftForeArm',-.35*back-.15*f,0,.04);this.rot('LeftHand',-.08*f,0,.06);
-    this.rot('RightShoulder',-.12*back,0,-.1*back);this.rot('RightArm',1.05*back-2.45*hit-.75*f,-.16*back,-.1*back);this.rot('RightForeArm',-1.1*back+.95*hit-.3*f,0,-.05*hit);this.rot('RightHand',-.25*back+.38*hit-.1*f,0,-.06);
-    const k=.3*back+.18*f;this.rot('LeftUpLeg',k,.04);this.rot('LeftLeg',-.55*k);this.rot('LeftFoot',.1*f);this.rot('RightUpLeg',k,-.04);this.rot('RightLeg',-.55*k);this.rot('RightFoot',.1*f);this.fingers('left',.18,.1);this.fingers('right',.38,-.18);}
+  idle(t){
+    // Pose neutra: brazos abajo, sueltos y separados del torso.
+    // La respiración mueve principalmente torso/cuello; los brazos solo acompañan mínimamente.
+    const b=.5+.5*Math.sin(t*1.8),s=Math.sin(t*.9);
+    this.rot('Spine',-.018*b,.006*s);this.rot('Spine01',-.028*b,.009*s);this.rot('Spine02',-.032*b,.011*s);
+    this.rot('Neck',.012*b,-.008*s);this.rot('Head',.008*b,-.012*s);
+    this.rot('LeftShoulder',.015,0,.075);this.rot('LeftArm',.045+.012*b,.018,.105);this.rot('LeftForeArm',-.045+.012*b,0,.035);this.rot('LeftHand',.015,0,.045);
+    this.rot('RightShoulder',.015,0,-.075);this.rot('RightArm',.045+.012*b,-.018,-.105);this.rot('RightForeArm',-.045+.012*b,0,-.035);this.rot('RightHand',.015,0,-.045);
+    this.rot('LeftUpLeg',-.02);this.rot('LeftLeg',.045);this.rot('LeftFoot',-.015);this.rot('RightUpLeg',-.02);this.rot('RightLeg',.045);this.rot('RightFoot',-.015);
+    this.fingers('left',.08,.07);this.fingers('right',.08,-.07);
+  }
+  run(t,sp){
+    // Carrera atlética: ligera inclinación hacia delante + braceo alternado, sin brazos rígidos.
+    const f=7.2+(sp?1.6:0),a=Math.sin(t*f),b=Math.sin(t*f+Math.PI),lift=Math.abs(a);
+    const lean=sp?-.16:-.12;
+    this.rot('Spine',lean,.035*a);this.rot('Spine01',lean*1.12,.045*a);this.rot('Spine02',lean*.78,.055*a);
+    this.rot('Neck',-.025,.018*a);this.rot('Head',.018,-.014*a);
+    this.rot('LeftShoulder',.02,0,.06);this.rot('LeftArm',.30+.58*a,.035,.10);this.rot('LeftForeArm',-.34+.18*lift,0,.04);this.rot('LeftHand',.08*a,0,.04);
+    this.rot('RightShoulder',.02,0,-.06);this.rot('RightArm',.30+.58*b,-.035,-.10);this.rot('RightForeArm',-.34+.18*Math.abs(b),0,-.04);this.rot('RightHand',.08*b,0,-.04);
+    this.rot('LeftUpLeg',-.72*b);this.rot('LeftLeg',.92*Math.max(0,a));this.rot('LeftFoot',-.28*Math.max(0,-a));
+    this.rot('RightUpLeg',-.72*a);this.rot('RightLeg',.92*Math.max(0,b));this.rot('RightFoot',-.28*Math.max(0,-b));
+    this.fingers('left',.18,.05);this.fingers('right',.18,-.05);
+  }
+  jump(u){
+    // Salto de vóley: brazos bajan durante la carga, barren hacia arriba en el despegue
+    // y siguen moviéndose durante el vuelo en vez de quedar congelados.
+    const x=Math.max(0,Math.min(1,u/.28));
+    const rise=Math.sin(Math.PI*x),back=Math.max(0,1-x*1.35),up=Math.max(0,Math.min(1,(x-.18)/.82));
+    const swing=Math.sin(Math.PI*Math.max(0,Math.min(1,(x-.08)/.92)));
+    this.rot('Spine',-.10*back+.035*up,.025*Math.sin(Math.PI*x));this.rot('Spine01',-.15*back+.055*up,.035*Math.sin(Math.PI*x));this.rot('Spine02',-.12*back+.045*up,.045*Math.sin(Math.PI*x));
+    this.rot('Neck',.025*rise,-.012*Math.sin(Math.PI*x));this.rot('Head',.018*rise,-.016*Math.sin(Math.PI*x));
+    // Brazos: atrás abajo -> arriba -> relajación durante el vuelo.
+    const armLift=-.82*swing+.22*up;
+    this.rot('LeftShoulder',-.08*swing,.025,.11*swing);this.rot('LeftArm',armLift,.045,.13);
+    this.rot('LeftForeArm',-.20*swing-.10*up,0,.045);this.rot('LeftHand',-.035*swing,0,.05);
+    this.rot('RightShoulder',-.08*swing,-.025,-.11*swing);this.rot('RightArm',armLift,-.045,-.13);
+    this.rot('RightForeArm',-.20*swing-.10*up,0,-.045);this.rot('RightHand',-.035*swing,0,-.05);
+    this.rot('LeftUpLeg',.38*back+.08*up);this.rot('LeftLeg',-.58*back-.22*up);this.rot('LeftFoot',.08*up);
+    this.rot('RightUpLeg',.38*back+.08*up);this.rot('RightLeg',-.58*back-.22*up);this.rot('RightFoot',.08*up);
+    this.fingers('left',.10+.10*rise,.10);this.fingers('right',.10+.10*rise,-.10);
+  }
+  spike(u){
+    // Remate derecho: preparación con codo derecho alto y mano detrás de la cabeza,
+    // torso arqueado/rotado; después solo el brazo derecho acelera y el izquierdo cae.
+    const t=Math.max(0,Math.min(1,u));
+    const prep=Math.max(0,Math.min(1,t/.34));
+    const hit=Math.max(0,Math.min(1,(t-.34)/.24));
+    const follow=Math.max(0,Math.min(1,(t-.58)/.42));
+    const whip=Math.sin(Math.PI*hit);
+    const p2=prep*(1-hit);
+    this.rot('Spine',.10*p2-.18*hit+.10*follow,.10*p2+.12*hit);
+    this.rot('Spine01',.18*p2-.27*hit+.14*follow,.15*p2+.18*hit);
+    this.rot('Spine02',.22*p2-.34*hit+.17*follow,.18*p2+.22*hit);
+    this.rot('Neck',-.035*p2+.055*hit,-.07*hit);this.rot('Head',-.025*p2+.045*hit,-.08*hit);
+    // Brazo izquierdo: acompaña el apuntado y luego baja claramente.
+    this.rot('LeftShoulder',-.10*p2+.10*follow,0,.12*p2);this.rot('LeftArm',-.70*p2+.30*follow,.10*p2,.14*p2);
+    this.rot('LeftForeArm',-.18*p2-.25*follow,0,.05);this.rot('LeftHand',-.05*p2-.08*follow,0,.04);
+    // Brazo derecho: atrás con codo alto -> latigazo hacia arriba/adelante -> seguimiento.
+    this.rot('RightShoulder',-.18*p2+.12*hit,0,-.12*p2);
+    this.rot('RightArm',1.12*p2-2.30*hit-.70*follow,-.18*p2,-.13*p2+.10*hit);
+    this.rot('RightForeArm',-1.28*p2+.95*hit-.28*follow,0,-.08*hit);
+    this.rot('RightHand',-.30*p2+.42*hit-.16*follow,0,-.10);
+    const k=.32*p2+.16*follow;
+    this.rot('LeftUpLeg',k,.04);this.rot('LeftLeg',-.55*k);this.rot('LeftFoot',.08*follow);
+    this.rot('RightUpLeg',k,-.04);this.rot('RightLeg',-.55*k);this.rot('RightFoot',.08*follow);
+    this.fingers('left',.16+.20*follow,.10);this.fingers('right',.34+.08*hit,-.16);
+  }
   receive(u){const a=Math.sin(Math.PI*Math.min(1,u));this.rot('Spine',.18*a);this.rot('Spine01',.3*a);this.rot('Spine02',.2*a);this.rot('Neck',-.04*a);this.rot('Head',-.05*a);
     this.rot('LeftShoulder',.12*a,0,.1);this.rot('LeftArm',-.72*a,.1*a,.05);this.rot('LeftForeArm',.12*a,0,.02);this.rot('LeftHand',-.1*a,0,.04);this.rot('RightShoulder',.12*a,0,-.1);this.rot('RightArm',-.72*a,-.1*a,-.05);this.rot('RightForeArm',.12*a,0,-.02);this.rot('RightHand',-.1*a,0,-.04);
     this.rot('LeftUpLeg',.42*a);this.rot('LeftLeg',-.58*a);this.rot('LeftFoot',.12*a);this.rot('RightUpLeg',.42*a);this.rot('RightLeg',-.58*a);this.rot('RightFoot',.12*a);this.fingers('left',.55,.04);this.fingers('right',.55,-.04);}
