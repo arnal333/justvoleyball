@@ -1,4 +1,19 @@
 
+  #gameVersion {
+    position: fixed;
+    left: 14px;
+    top: 14px;
+    z-index: 31;
+    padding: 4px 7px;
+    border-radius: 7px;
+    background: rgba(5, 10, 25, 0.58);
+    color: rgba(255,255,255,0.72);
+    font: 700 10px/1 Arial, sans-serif;
+    letter-spacing: .5px;
+    pointer-events: none;
+    user-select: none;
+  }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     height: 100%; overflow: hidden;
