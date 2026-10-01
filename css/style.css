@@ -356,3 +356,25 @@ body.is-mobile-device #startOverlay h2 {
 body.is-mobile-device #startOverlay .cta {
   margin-top: 18px;
 }
+
+
+/* Selector de esquema de controles PC / Móvil */
+#controlModeToggle {
+  position: fixed;
+  top: 48px;
+  left: 14px;
+  z-index: 32;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 9px;
+  padding: 6px 9px;
+  background: rgba(5,10,25,.68);
+  color: rgba(255,255,255,.86);
+  font: 800 10px/1 Arial,sans-serif;
+  letter-spacing: .4px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#controlModeToggle:active { transform: scale(.95); }
+body:not(.is-mobile-device) #mobileHUD { display: none; }
+body.is-mobile-device #controlModeToggle { background: rgba(8,100,130,.78); }
