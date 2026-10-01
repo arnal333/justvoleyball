@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { GLTFLoader as _GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 window.THREE = THREE;
 
 // Plataforma / controles táctiles.
@@ -1130,7 +1129,7 @@ class CharacterVisual3D {
 
     if (mode==='run') this.setMode('run', sprintFactor ? 1.12 : 0.78);
     else if (mode==='idle') this.setMode('idle');
-    else if (mode==='spike' && this.spikeAction) this.setMode('spike', 1, true);
+    else if (mode==='spike' && this.spikeAction) this.setMode('spike');
     else this.stopActions();
 
     if (mode==='run' || mode==='idle' || (mode==='spike' && this.spikeAction)) {
