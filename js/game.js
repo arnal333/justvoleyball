@@ -948,215 +948,47 @@ function buildRelativeQuaternionTrack(src, targetBone, sourceRest=null) {
 }
 
 class CharacterVisual3D {
-  constructor(entity, sourceScene, runClip, idleClip, spikeClip) {
-    this.entity = entity;
-    this.root = new THREE.Group();
-    this.root.name = 'Player3D_' + entity.team + (entity.isPlayer ? '_human' : '_bot');
-    this.model = SkeletonUtils.clone(sourceScene);
-    this.root.add(this.model);
-    scene.add(this.root);
-
-    this.model.traverse(o => {
-      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
-    });
-    // El GLB base mide 1.70 m en su geometría. No usamos Box3 de un SkinnedMesh
-    // porque puede incluir la pose/esqueleto y dar una escala incorrecta.
-    const SOURCE_MODEL_H = 1.70;
-    const scale = VISUAL_PLAYER_H / SOURCE_MODEL_H;
-    this.model.scale.setScalar(scale);
-    // Corrección visual: el asset mira al eje opuesto al forward del juego.
-    // Se corrige aquí sin cambiar la orientación lógica/physics del jugador.
-    this.model.rotation.y = Math.PI;
-    const box2 = new THREE.Box3().setFromObject(this.model);
-    this.model.position.y -= box2.min.y;
-
-    this.bones = new Map();
-    this.model.traverse(o => { if (o.isBone) this.bones.set(o.name, o); });
-    this.base = new Map();
-    for (const [name,bone] of this.bones) {
-      this.base.set(name, {
-        q: bone.quaternion.clone(),
-        p: bone.position.clone(),
-        s: bone.scale.clone()
-      });
-    }
-
-    const ringColor = entity.team === 'home' ? 0x00ffcc : 0xff33cc;
-    this.ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.55,0.70,32),
-      new THREE.MeshBasicMaterial({color:ringColor,side:THREE.DoubleSide,transparent:true,opacity:0.9})
-    );
-    this.ring.rotation.x = -Math.PI/2; this.ring.position.y = 0.04; this.root.add(this.ring);
-
-    this.mixer = new THREE.AnimationMixer(this.model);
-    this.runAction = runClip ? this.mixer.clipAction(runClip) : null;
-    this.idleAction = idleClip ? this.mixer.clipAction(idleClip) : null;
-    this.spikeAction = spikeClip ? this.mixer.clipAction(spikeClip) : null;
-    for (const a of [this.runAction, this.idleAction, this.spikeAction]) {
-      if (a) { a.setLoop(THREE.LoopRepeat, Infinity); a.enabled = false; }
-    }
-    // Arrancamos sin modo para obligar a setMode('idle') a reproducir
-    // la animación authored desde el primer frame.
-    this.mode = null;
-    this.runSpeed = 1;
-    this.lastMoving = false;
-    this.poseMode = 'idle';
-    this.poseDuration = 0.4;
-    this.setMode('idle');
+  constructor(entity,sourceScene){
+    this.entity=entity;this.root=new THREE.Group();this.root.name='Player3D_'+entity.team+(entity.isPlayer?'_human':'_bot');
+    this.model=SkeletonUtils.clone(sourceScene);this.root.add(this.model);scene.add(this.root);
+    this.model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
+    this.model.scale.setScalar(VISUAL_PLAYER_H/1.70);this.model.rotation.y=Math.PI;
+    const box=new THREE.Box3().setFromObject(this.model);this.model.position.y-=box.min.y;
+    this.bones=new Map();this.model.traverse(o=>{if(o.isBone)this.bones.set(o.name,o);});
+    this.base=new Map();for(const[n,b]of this.bones)this.base.set(n,{q:b.quaternion.clone(),p:b.position.clone(),s:b.scale.clone()});
+    this.q=new THREE.Quaternion();this.e=new THREE.Euler(0,0,0,'XYZ');this.time=0;this.poseMode='idle';this.lastMoving=false;
+    const rc=entity.team==='home'?0x00ffcc:0xff33cc;this.ring=new THREE.Mesh(new THREE.RingGeometry(.55,.70,32),new THREE.MeshBasicMaterial({color:rc,side:THREE.DoubleSide,transparent:true,opacity:.9}));
+    this.ring.rotation.x=-Math.PI/2;this.ring.position.y=.04;this.root.add(this.ring);
   }
-  resetPose() {
-    for (const [name,bone] of this.bones) {
-      const b = this.base.get(name); if (!b) continue;
-      bone.quaternion.copy(b.q); bone.position.copy(b.p); bone.scale.copy(b.s);
-    }
-  }
-  stopActions() {
-    if (this.runAction) { this.runAction.stop(); this.runAction.enabled=false; }
-    if (this.idleAction) { this.idleAction.stop(); this.idleAction.enabled=false; }
-    if (this.spikeAction) { this.spikeAction.stop(); this.spikeAction.enabled=false; }
-    this.resetPose();
-  }
-  setIdleClip(idleClip) {
-    if (!idleClip || this.idleAction) return;
-    this.idleAction = this.mixer.clipAction(idleClip);
-    this.idleAction.setLoop(THREE.LoopRepeat, Infinity);
-    this.idleAction.enabled = false;
-    if (this.mode === 'idle') this.setMode('idle', this.runSpeed, true);
-  }
-
-  setMode(mode, speed=1, force=false) {
-    if (!force && this.mode === mode && Math.abs(this.runSpeed-speed) < 0.03) return;
-    this.mode = mode; this.runSpeed = speed;
-    this.stopActions();
-    if (mode === 'run' && this.runAction) {
-      this.runAction.reset(); this.runAction.enabled=true; this.runAction.timeScale=speed; this.runAction.play();
-    } else if (mode === 'idle' && this.idleAction) {
-      this.idleAction.reset(); this.idleAction.enabled=true; this.idleAction.timeScale=1; this.idleAction.play();
-    } else if (mode === 'spike' && this.spikeAction) {
-      this.spikeAction.reset(); this.spikeAction.enabled=true;
-      this.spikeAction.timeScale = this.spikeAction.getClip().duration / 0.9;
-      this.spikeAction.play();
-    }
-  }
-  bone(name) { return this.bones.get(name); }
-  baseQ(name) { return this.base.get(name)?.q; }
-  deltaEuler(name, x=0,y=0,z=0) {
-    const bone=this.bone(name), base=this.baseQ(name); if(!bone||!base) return;
-    const d=new THREE.Quaternion().setFromEuler(new THREE.Euler(x,y,z,'XYZ'));
-    bone.quaternion.copy(base).multiply(d).normalize();
-  }
-  updateActionPose(action, t) {
-    const u=Math.max(0,Math.min(1,t));
-    const wave=Math.sin(u*Math.PI);
-    const smooth=u*u*(3-2*u);
-    if(action==='jump' || action==='jumpstart') {
-      const prep=Math.sin(Math.min(1,u*1.8)*Math.PI/2);
-      this.deltaEuler('Spine', -0.08*prep,0,0);
-      this.deltaEuler('Spine01', -0.16*prep,0,0);
-      this.deltaEuler('Spine02', -0.18*prep,0,0);
-      this.deltaEuler('LeftArm', -1.0*prep,0.05,0.08);
-      this.deltaEuler('RightArm', -1.0*prep,-0.05,-0.08);
-      this.deltaEuler('LeftForeArm', -0.35*prep,0,0);
-      this.deltaEuler('RightForeArm', -0.35*prep,0,0);
-      this.deltaEuler('LeftUpLeg', 0.55*prep,0,0);
-      this.deltaEuler('RightUpLeg', 0.55*prep,0,0);
-      this.deltaEuler('LeftLeg', -0.75*prep,0,0);
-      this.deltaEuler('RightLeg', -0.75*prep,0,0);
-    } else if(action==='spike') {
-      const prep=u<0.42 ? u/0.42 : 1;
-      const snap=u<0.42 ? 0 : (u-0.42)/0.58;
-      this.deltaEuler('Spine', 0.16*wave,0,0);
-      this.deltaEuler('Spine01', 0.25*wave,0,0);
-      this.deltaEuler('Spine02', 0.22*wave,0,0);
-      this.deltaEuler('LeftArm', -1.0*wave,0.0,0.1*wave);
-      this.deltaEuler('LeftForeArm', -0.35*wave,0,0);
-      this.deltaEuler('RightArm', -2.0*prep + 3.1*snap*wave,0.0,-0.12*wave);
-      this.deltaEuler('RightForeArm', -0.65*snap*wave,0,0);
-      this.deltaEuler('LeftUpLeg', -0.25*wave,0,0);
-      this.deltaEuler('RightUpLeg', -0.30*wave,0,0);
-    } else if(action==='receive') {
-      this.deltaEuler('Spine', 0.18*wave,0,0);
-      this.deltaEuler('Spine01', 0.32*wave,0,0);
-      this.deltaEuler('Spine02', 0.18*wave,0,0);
-      this.deltaEuler('LeftArm', -0.75*wave,0.15*wave,0.05);
-      this.deltaEuler('RightArm', -0.75*wave,-0.15*wave,-0.05);
-      this.deltaEuler('LeftForeArm', 0.10*wave,0,0);
-      this.deltaEuler('RightForeArm', 0.10*wave,0,0);
-      this.deltaEuler('LeftUpLeg', 0.45*wave,0,0);
-      this.deltaEuler('RightUpLeg', 0.45*wave,0,0);
-      this.deltaEuler('LeftLeg', -0.55*wave,0,0);
-      this.deltaEuler('RightLeg', -0.55*wave,0,0);
-    } else if(action==='set') {
-      this.deltaEuler('Spine01', -0.12*wave,0,0);
-      this.deltaEuler('Spine02', -0.12*wave,0,0);
-      this.deltaEuler('LeftArm', -1.55*wave,0.12*wave,0.15*wave);
-      this.deltaEuler('RightArm', -1.55*wave,-0.12*wave,-0.15*wave);
-      this.deltaEuler('LeftForeArm', -0.85*wave,0,0);
-      this.deltaEuler('RightForeArm', -0.85*wave,0,0);
-    } else if(action==='block') {
-      this.deltaEuler('Spine', -0.18*wave,0,0);
-      this.deltaEuler('Spine01', -0.22*wave,0,0);
-      this.deltaEuler('LeftArm', -1.85*wave,0.08*wave,0.12*wave);
-      this.deltaEuler('RightArm', -1.85*wave,-0.08*wave,-0.12*wave);
-      this.deltaEuler('LeftForeArm', -0.55*wave,0,0);
-      this.deltaEuler('RightForeArm', -0.55*wave,0,0);
-    } else if(action==='land') {
-      const squash=wave;
-      this.deltaEuler('Spine',0.16*squash,0,0);
-      this.deltaEuler('Spine01',0.22*squash,0,0);
-      this.deltaEuler('LeftUpLeg',0.30*squash,0,0);
-      this.deltaEuler('RightUpLeg',0.30*squash,0,0);
-      this.deltaEuler('LeftLeg',-0.38*squash,0,0);
-      this.deltaEuler('RightLeg',-0.38*squash,0,0);
-    }
-  }
-  applyBreathing(dt) {
-    // La respiración ahora proviene de la animación authored del GLB.
-    // Se conserva este método solo por compatibilidad.
-  }
-  update(dt, entity, moving, sprintFactor) {
-    let mode;
-    if (entity.diveTime > 0) mode='receive';
-    else if (entity.action && entity.actionTime > 0) mode=entity.action==='jumpstart'?'jumpstart':entity.action;
-    else if (!entity.onGround) mode='jump';
-    else if (moving) mode='run';
-    else mode='idle';
-
-    if (mode !== this.poseMode) {
-      this.poseMode = mode;
-      this.poseDuration = mode === 'jumpstart' ? 0.16 : Math.max(0.16, entity.actionTime || 0.4);
-    }
-
-    if (mode==='run') this.setMode('run', sprintFactor ? 1.12 : 0.78);
-    else if (mode==='idle') this.setMode('idle');
-    else if (mode==='spike' && this.spikeAction) this.setMode('spike');
-    else this.stopActions();
-
-    if (mode==='run' || mode==='idle' || (mode==='spike' && this.spikeAction)) {
-      if (this.mixer) this.mixer.update(dt);
-    } else {
-      const progress = entity.action && entity.actionTime > 0
-        ? 1 - Math.max(0, entity.actionTime / this.poseDuration)
-        : Math.min(1, (entity.airTime || 0) / 0.28);
-      this.updateActionPose(mode, progress);
-    }
-
-    if (entity.actionTime > 0) {
-      entity.actionTime -= dt;
-      if (entity.actionTime <= 0) entity.action=null;
-    }
-
-    const s=entity.diveTime>0 ? 1.25 : 1;
-    this.ring.scale.x += (s-this.ring.scale.x)*Math.min(1,dt*12);
-    this.ring.scale.z += (s-this.ring.scale.z)*Math.min(1,dt*12);
-    if (entity.diveTime<=0) {
-      this.ring.scale.x += (1-this.ring.scale.x)*0.15;
-      this.ring.scale.z += (1-this.ring.scale.z)*0.15;
-    }
-  }
-}
-
-async function init3DCharacters() {
+  bone(n){if(this.bones.has(n))return this.bones.get(n);const k=normalizeBoneName(n);for(const[name,b]of this.bones)if(normalizeBoneName(name)===k)return b;return null;}
+  resetPose(){for(const[n,b]of this.bones){const x=this.base.get(n);if(x){b.quaternion.copy(x.q);b.position.copy(x.p);b.scale.copy(x.s);}}}
+  rot(n,x=0,y=0,z=0){const b=this.bone(n),x0=b&&this.base.get(b.name);if(!b||!x0)return;this.e.set(x,y,z,'XYZ');this.q.setFromEuler(this.e);b.quaternion.copy(x0.q).multiply(this.q).normalize();}
+  fingers(side,curl=0,spread=0){const s=side.toLowerCase();for(const[n,b]of this.bones){const k=normalizeBoneName(n);if(!k.startsWith(s)||!k.includes('hand')||!/(index|middle|ring|pinky|thumb|finger|end)/.test(k))continue;const x0=this.base.get(n);if(!x0)continue;this.e.set((k.endsWith('end')?.08:.16)*curl,spread*(k.includes('thumb')?.4:k.includes('index')?-.15:.05),0,'XYZ');this.q.setFromEuler(this.e);b.quaternion.copy(x0.q).multiply(this.q).normalize();}}
+  idle(t){const b=.5+.5*Math.sin(t*2.2),s=Math.sin(t*1.1);this.rot('Spine',-.025*b,.008*s);this.rot('Spine01',-.04*b,.012*s);this.rot('Spine02',-.045*b,.014*s);this.rot('Neck',.018*b,-.012*s);this.rot('Head',.012*b,-.018*s);
+    this.rot('LeftShoulder',.02,0,.035);this.rot('LeftArm',.12+.015*b,.02,.055);this.rot('LeftForeArm',-.08+.02*b,0,.02);this.rot('LeftHand',.02,0,.03);
+    this.rot('RightShoulder',.02,0,-.035);this.rot('RightArm',.12+.015*b,-.02,-.055);this.rot('RightForeArm',-.08+.02*b,0,-.02);this.rot('RightHand',.02,0,-.03);
+    this.rot('LeftUpLeg',-.025);this.rot('LeftLeg',.055);this.rot('LeftFoot',-.018);this.rot('RightUpLeg',-.025);this.rot('RightLeg',.055);this.rot('RightFoot',-.018);this.fingers('left',.1,.08);this.fingers('right',.1,-.08);}
+  run(t,sp){const f=8+(sp?1.5:0),a=Math.sin(t*f),b=Math.sin(t*f+Math.PI);this.rot('Spine',-.08,.035*a);this.rot('Spine01',-.1,.045*a);this.rot('Spine02',-.08,.055*a);
+    this.rot('LeftArm',.55*a,.02,.05);this.rot('LeftForeArm',-.25+.12*Math.abs(a),0,.02);this.rot('LeftHand',.05*a,0,.03);this.rot('RightArm',.55*b,-.02,-.05);this.rot('RightForeArm',-.25+.12*Math.abs(b),0,-.02);this.rot('RightHand',.05*b,0,-.03);
+    this.rot('LeftUpLeg',-.75*b);this.rot('LeftLeg',.85*Math.max(0,a));this.rot('LeftFoot',-.25*Math.max(0,-a));this.rot('RightUpLeg',-.75*a);this.rot('RightLeg',.85*Math.max(0,b));this.rot('RightFoot',-.25*Math.max(0,-b));this.fingers('left',.22,.05);this.fingers('right',.22,-.05);}
+  jump(u){const p=Math.max(0,1-u/.22),a=Math.sin(Math.PI*Math.min(1,u)),f=Math.max(0,(u-.55)/.45),l=.35+.55*a;this.rot('Spine',-.12*p+.1*f);this.rot('Spine01',-.22*p+.12*f);this.rot('Spine02',-.2*p+.1*f);this.rot('Neck',.035*a);this.rot('Head',.025*a);
+    this.rot('LeftArm',-.75*l,.04,.1);this.rot('LeftForeArm',-.35*l,0,.03);this.rot('LeftHand',-.05*a,0,.04);this.rot('RightArm',-.75*l,-.04,-.1);this.rot('RightForeArm',-.35*l,0,-.03);this.rot('RightHand',-.05*a,0,-.04);
+    this.rot('LeftUpLeg',.35*p+.12*f);this.rot('LeftLeg',-.5*p-.3*f);this.rot('LeftFoot',.1*f);this.rot('RightUpLeg',.35*p+.12*f);this.rot('RightLeg',-.5*p-.3*f);this.rot('RightFoot',.1*f);this.fingers('left',.12,.12);this.fingers('right',.12,-.12);}
+  spike(u){const back=Math.min(1,u/.3)*(1-Math.max(0,Math.min(1,(u-.3)/.22))),hit=Math.max(0,Math.min(1,(u-.3)/.22)),f=Math.max(0,Math.min(1,(u-.52)/.48));
+    this.rot('Spine',.1*back-.18*hit+.12*f,.1*hit);this.rot('Spine01',.18*back-.28*hit+.15*f,.14*hit);this.rot('Spine02',.2*back-.34*hit+.16*f,.18*hit);this.rot('Neck',-.05*back+.08*hit,-.08*hit);this.rot('Head',-.04*back+.06*hit,-.1*hit);
+    this.rot('LeftShoulder',-.05*back,0,.12*back);this.rot('LeftArm',-.95*back-.55*f,.12*back,.16*back);this.rot('LeftForeArm',-.35*back-.15*f,0,.04);this.rot('LeftHand',-.08*f,0,.06);
+    this.rot('RightShoulder',-.12*back,0,-.1*back);this.rot('RightArm',1.05*back-2.45*hit-.75*f,-.16*back,-.1*back);this.rot('RightForeArm',-1.1*back+.95*hit-.3*f,0,-.05*hit);this.rot('RightHand',-.25*back+.38*hit-.1*f,0,-.06);
+    const k=.3*back+.18*f;this.rot('LeftUpLeg',k,.04);this.rot('LeftLeg',-.55*k);this.rot('LeftFoot',.1*f);this.rot('RightUpLeg',k,-.04);this.rot('RightLeg',-.55*k);this.rot('RightFoot',.1*f);this.fingers('left',.18,.1);this.fingers('right',.38,-.18);}
+  receive(u){const a=Math.sin(Math.PI*Math.min(1,u));this.rot('Spine',.18*a);this.rot('Spine01',.3*a);this.rot('Spine02',.2*a);this.rot('Neck',-.04*a);this.rot('Head',-.05*a);
+    this.rot('LeftShoulder',.12*a,0,.1);this.rot('LeftArm',-.72*a,.1*a,.05);this.rot('LeftForeArm',.12*a,0,.02);this.rot('LeftHand',-.1*a,0,.04);this.rot('RightShoulder',.12*a,0,-.1);this.rot('RightArm',-.72*a,-.1*a,-.05);this.rot('RightForeArm',.12*a,0,-.02);this.rot('RightHand',-.1*a,0,-.04);
+    this.rot('LeftUpLeg',.42*a);this.rot('LeftLeg',-.58*a);this.rot('LeftFoot',.12*a);this.rot('RightUpLeg',.42*a);this.rot('RightLeg',-.58*a);this.rot('RightFoot',.12*a);this.fingers('left',.55,.04);this.fingers('right',.55,-.04);}
+  setPose(u){const a=Math.sin(Math.PI*Math.min(1,u));this.rot('Spine',-.08*a);this.rot('Spine01',-.16*a);this.rot('Spine02',-.12*a);this.rot('Neck',.05*a);this.rot('Head',.08*a);
+    this.rot('LeftShoulder',-.15*a,0,.1*a);this.rot('LeftArm',-1.35*a,.08*a,.12*a);this.rot('LeftForeArm',-.85*a,0,.05*a);this.rot('LeftHand',-.12*a,0,.06*a);this.rot('RightShoulder',-.15*a,0,-.1*a);this.rot('RightArm',-1.35*a,-.08*a,-.12*a);this.rot('RightForeArm',-.85*a,0,-.05*a);this.rot('RightHand',-.12*a,0,-.06*a);this.rot('LeftUpLeg',-.12*a);this.rot('RightUpLeg',-.12*a);this.fingers('left',.35,.15);this.fingers('right',.35,-.15);}
+  dive(u){const a=Math.min(1,u*3);this.rot('Spine',.45*a);this.rot('Spine01',.55*a);this.rot('Spine02',.35*a);this.rot('Neck',-.1*a);this.rot('Head',-.12*a);this.rot('LeftArm',-1.15*a,.12*a,.15*a);this.rot('LeftForeArm',-.35*a,0,.08);this.rot('RightArm',-1.15*a,-.12*a,-.15*a);this.rot('RightForeArm',-.35*a,0,-.08);this.rot('LeftUpLeg',-.2*a);this.rot('RightUpLeg',-.2*a);this.rot('LeftLeg',.35*a);this.rot('RightLeg',.35*a);this.fingers('left',.18,.2);this.fingers('right',.18,-.2);}
+  update(dt,e,moving,sprint){const mode=e.diveTime>0?'dive':(e.action&&e.actionTime>0?(e.action==='jumpstart'?'jumpstart':e.action):(!e.onGround?'jump':(moving?'run':'idle')));if(mode!==this.poseMode||moving!==this.lastMoving){this.poseMode=mode;this.time=0;}this.lastMoving=moving;this.time+=dt*(mode==='run'?(sprint?1.18:1):1);this.resetPose();
+    if(mode==='idle')this.idle(this.time);else if(mode==='run')this.run(this.time,!!sprint);else{const p=e.action&&e.actionTime>0?Math.max(0,Math.min(1,1-e.actionTime/Math.max(.16,e.actionTime+.001))):Math.max(0,Math.min(1,(e.airTime||0)/.28));if(mode==='spike')this.spike(p);else if(mode==='receive')this.receive(p);else if(mode==='set')this.setPose(p);else if(mode==='dive')this.dive(p);else this.jump(p);}
+    if(e.actionTime>0){e.actionTime-=dt;if(e.actionTime<=0)e.action=null;}const rs=e.diveTime>0?1.25:1;this.ring.scale.x+=(rs-this.ring.scale.x)*Math.min(1,dt*12);this.ring.scale.z+=(rs-this.ring.scale.z)*Math.min(1,dt*12);}
+}async function init3DCharacters() {
   try {
     const gltf = await new GLTFLoader().loadAsync('characters/player_base_rigged.glb?v=1.0.2');
     characterAssets.scene = gltf.scene;
