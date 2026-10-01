@@ -1164,10 +1164,10 @@ async function init3DCharacters() {
       const refBones = new Map();
       ref.traverse(o => { if (o.isBone) refBones.set(o.name, o); });
 
-      // Los nombres que entrega GLTFLoader conservan el prefijo mixamorig:
-      // (por ejemplo "mixamorig:Spine2"). Filtramos por nombre normalizado,
-      // no por target.name literal, para que la animación realmente encuentre
-      // los huesos del modelo clonado.
+      // La animación fue creada sobre ESTE MISMO esqueleto del GLB.
+      // No hay que retargetear ni calcular deltas: usamos sus rotaciones
+      // originales para que la pose de brazos bajos sea exactamente la
+      // que guardaste en tu animación.
       const allowed = new Set([
         'spine','spine1','spine2','neck',
         'leftshoulder','leftarm','leftforearm','lefthand',
@@ -1181,8 +1181,13 @@ async function init3DCharacters() {
         const target = findCharacterBone(raw, refBones);
         if (!target || !allowed.has(normalizeBoneName(target.name))) continue;
 
-        const mapped = buildRelativeQuaternionTrack(track, target);
-        if (mapped) tracks.push(mapped);
+        // Mantener el track original: mismo esqueleto, mismos nombres,
+        // misma pose inicial y misma animación hecha por el usuario.
+        tracks.push(new THREE.QuaternionKeyframeTrack(
+          target.name + '.quaternion',
+          track.times.slice(),
+          track.values.slice()
+        ));
       }
 
       if (tracks.length) {
