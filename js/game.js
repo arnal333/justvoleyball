@@ -1148,7 +1148,7 @@ class CharacterVisual3D {
 
 async function init3DCharacters() {
   try {
-    const gltf = await new GLTFLoader().loadAsync('characters/player_base_rigged.glb');
+    const gltf = await new GLTFLoader().loadAsync('characters/player_base_rigged.glb?v=1.0.2');
     characterAssets.scene = gltf.scene;
     characterAssets.runClip = gltf.animations?.find(a => a.name === 'RunFast') || gltf.animations?.[0] || null;
 
