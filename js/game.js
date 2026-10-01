@@ -8,7 +8,7 @@ window.THREE = THREE;
 // Se detecta por soporte real de touch para cubrir Android, iOS y PCs táctiles.
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 const isAndroid = /Android/i.test(navigator.userAgent);
-const isMobile = isTouchDevice || isAndroid;
+let isMobile = isTouchDevice || isAndroid;
 
 
 
@@ -1789,7 +1789,7 @@ const SFX = {
 
 
 function createMobileControls() {
-  if (!isMobile || document.getElementById('mobileHUD')) return;
+  if (document.getElementById('mobileHUD')) return;
 
   document.body.classList.add('is-mobile-device');
 
@@ -1949,10 +1949,9 @@ function setupCameraTouch() {
 }
 
 function adaptStartOverlay() {
-  if (!isMobile) return;
-
   const keylist = document.querySelector('#startOverlay .keylist');
-  if (keylist) {
+  if (!keylist) return;
+  if (isMobile) {
     keylist.innerHTML = `
       <div class="row"><kbd>Joystick izq.</kbd><span>moverte</span></div>
       <div class="row"><kbd>Desliza derecha</kbd><span>rotar cámara</span></div>
@@ -1961,16 +1960,39 @@ function adaptStartOverlay() {
       <div class="row"><kbd>↑ SALTAR</kbd><span>para rematar en el aire</span></div>
       <div class="row"><kbd>C DIVE</kbd><span>tirarse al suelo</span></div>
     `;
+  } else {
+    keylist.innerHTML = `
+      <div class="row"><kbd>WASD</kbd><span>moverte (Libre!)</span></div>
+      <div class="row"><kbd>MOUSE</kbd><span>rotar cámara</span></div>
+      <div class="row"><kbd>RUEDA</kbd><span>zoom</span></div>
+      <div class="row"><kbd>ESPACIO</kbd><span>saltar</span></div>
+      <div class="row"><kbd>E</kbd><span>colocar / armar</span></div>
+      <div class="row"><kbd>CLIC</kbd><span>golpear / rematar</span></div>
+      <div class="row"><kbd>C</kbd><span>tirarse al suelo</span></div>
+      <div class="row"><kbd>SHIFT</kbd><span>correr</span></div>
+    `;
   }
 
   const cta = document.querySelector('#startOverlay .cta');
-  if (cta) cta.textContent = '▶ Toca para empezar';
+  if (cta) cta.textContent = isMobile ? '▶ Toca para empezar' : '▶ Hacé clic para empezar';
 
-  startOverlay.addEventListener('touchstart', () => {
-    ensureAudio();
-    if (gameState === 'gameover') restart();
-    startOverlay.classList.add('hidden');
-  }, { once: false, passive: true });
+  const toggle = document.getElementById('controlModeToggle');
+  if (toggle) toggle.textContent = isMobile ? '🖥️ PC' : '📱 MÓVIL';
+}
+
+
+function setControlMode(mobile) {
+  isMobile = !!mobile;
+  if (isMobile) {
+    createMobileControls();
+    document.body.classList.add('is-mobile-device');
+  } else {
+    document.body.classList.remove('is-mobile-device');
+  }
+  adaptStartOverlay();
+  const toggle = document.getElementById('controlModeToggle');
+  if (toggle) toggle.textContent = isMobile ? '🖥️ PC' : '📱 MÓVIL';
+  try { localStorage.setItem('jv_control_mode', isMobile ? 'mobile' : 'pc'); } catch (_) {}
 }
 
 renderer.domElement.addEventListener('mousedown', e => { if (pointerLocked && e.button === 0) clickPending = true; });
@@ -2825,5 +2847,18 @@ function loop(now) {
 
 updateHUD();
 startServe('home');
-createMobileControls();
+let savedControlMode = null;
+try { savedControlMode = localStorage.getItem('jv_control_mode'); } catch (_) {}
+if (savedControlMode === 'mobile') isMobile = true;
+else if (savedControlMode === 'pc') isMobile = false;
+
+const controlModeToggle = document.getElementById('controlModeToggle');
+if (controlModeToggle) {
+  controlModeToggle.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    setControlMode(!isMobile);
+  });
+}
+if (isMobile) createMobileControls();
+adaptStartOverlay();
 requestAnimationFrame(loop);
